@@ -1,0 +1,50 @@
+name: 'gke-allow-runner'
+description: 'Add/Remove GitHub Runner IP to GKE Authorized Networks'
+inputs:
+  project_id:
+    description: 'GCP Project ID'
+    required: true
+  location:
+    description: 'Cluster location (region or zone)'
+    required: true
+  cluster_name:
+    description: 'GKE Cluster Name'
+    required: true
+  mode:
+    description: 'Operation mode: add or remove'
+    required: false
+    default: 'add'
+  description:
+    description: 'Description for the authorized network entry'
+    required: false
+    default: 'GitHub Action runner'
+  service_account_key:
+    description: 'GCP Service Account Key (JSON)'
+    required: false
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      shell: bash
+      run: pip install requests google-cloud-container
+
+    - name: Auth with GCP
+      if: inputs.service_account_key != ''
+      uses: google-github-actions/auth@v2
+      with:
+        credentials_json: ${{ inputs.service_account_key }}
+
+    - name: Update GKE Authorized Networks
+      shell: bash
+      env:
+        INPUT_PROJECT_ID: ${{ inputs.project_id }}
+        INPUT_LOCATION: ${{ inputs.location }}
+        INPUT_CLUSTER_NAME: ${{ inputs.cluster_name }}
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_DESCRIPTION: ${{ inputs.description }}
+      run: python ${{ github.action_path }}/gke_updater.py

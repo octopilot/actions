@@ -1,0 +1,31 @@
+name: 'setup-tools'
+description: 'Setup Octopilot GitOps tools (kustomize, sops, yq, etc.)'
+inputs:
+  kustomize_version:
+    description: 'Version of kustomize'
+    default: '5.3.0'
+  sops_version:
+    description: 'Version of sops'
+    default: '3.8.1'
+  yq_version:
+    description: 'Version of yq'
+    default: '4.40.5'
+  kubectl_version:
+    description: 'Version of kubectl'
+    default: '1.29.1'
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install Tools
+      shell: bash
+      env:
+        KUSTOMIZE_VERSION: ${{ inputs.kustomize_version }}
+        SOPS_VERSION: ${{ inputs.sops_version }}
+        YQ_VERSION: ${{ inputs.yq_version }}
+        KUBECTL_VERSION: ${{ inputs.kubectl_version }}
+      run: python ${{ github.action_path }}/install_tools.py

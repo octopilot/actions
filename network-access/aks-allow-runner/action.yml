@@ -1,0 +1,42 @@
+name: 'aks-allow-runner'
+description: 'Add/Remove GitHub Runner IP to AKS Authorized Ranges (Placeholder)'
+inputs:
+  resource_group:
+    description: 'Azure Resource Group'
+    required: true
+  cluster_name:
+    description: 'AKS Cluster Name'
+    required: true
+  subscription_id:
+    description: 'Azure Subscription ID'
+    required: true
+  mode:
+    description: 'Operation mode: add or remove'
+    required: false
+    default: 'add'
+  description:
+    description: 'Description (Unused for AKS, kept for interface consistency)'
+    required: false
+    default: 'GitHub Action runner'
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      shell: bash
+      run: pip install requests azure-mgmt-containerservice azure-identity
+
+    # Assuming Azure login is done via azure/login action before this
+
+    - name: Update AKS Authorized Networks
+      shell: bash
+      env:
+        INPUT_RESOURCE_GROUP: ${{ inputs.resource_group }}
+        INPUT_CLUSTER_NAME: ${{ inputs.cluster_name }}
+        INPUT_SUBSCRIPTION_ID: ${{ inputs.subscription_id }}
+        INPUT_MODE: ${{ inputs.mode }}
+      run: python ${{ github.action_path }}/aks_updater.py

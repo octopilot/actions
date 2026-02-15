@@ -1,0 +1,37 @@
+name: 'rotate-secret'
+description: 'Rotate a GitHub repository secret'
+inputs:
+  secret_name:
+    description: 'Name of the secret to update'
+    required: true
+  secret_value:
+    description: 'New value for the secret'
+    required: true
+  repository:
+    description: 'Repository name (owner/repo). Defaults to current repository.'
+    required: false
+    default: ${{ github.repository }}
+  token:
+    description: 'GitHub Token with repo scope (or appropriate permissions) to update secrets.'
+    required: true
+    default: ${{ github.token }}
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      shell: bash
+      run: pip install requests pynacl
+
+    - name: Rotate Secret
+      shell: bash
+      env:
+        INPUT_SECRET_NAME: ${{ inputs.secret_name }}
+        INPUT_SECRET_VALUE: ${{ inputs.secret_value }}
+        INPUT_REPOSITORY: ${{ inputs.repository }}
+        INPUT_TOKEN: ${{ inputs.token }}
+      run: python ${{ github.action_path }}/rotate_secret.py

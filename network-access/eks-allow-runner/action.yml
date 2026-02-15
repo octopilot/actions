@@ -1,0 +1,39 @@
+name: 'eks-allow-runner'
+description: 'Add/Remove GitHub Runner IP to EKS Security Group (Placeholder)'
+inputs:
+  cluster_name:
+    description: 'EKS Cluster Name'
+    required: true
+  region:
+    description: 'AWS Region'
+    required: true
+  mode:
+    description: 'Operation mode: add or remove'
+    required: false
+    default: 'add'
+  description:
+    description: 'Description (Unused for EKS, kept for interface consistency)'
+    required: false
+    default: 'GitHub Action runner'
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      shell: bash
+      run: pip install requests boto3
+
+    # Assuming AWS credentials are set up via aws-actions/configure-aws-credentials
+    # before calling this action, or via env vars.
+
+    - name: Update EKS Authorized Networks
+      shell: bash
+      env:
+        INPUT_CLUSTER_NAME: ${{ inputs.cluster_name }}
+        INPUT_REGION: ${{ inputs.region }}
+        INPUT_MODE: ${{ inputs.mode }}
+      run: python ${{ github.action_path }}/eks_updater.py

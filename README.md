@@ -27,7 +27,7 @@ Example step using the release action directly:
 ```yaml
 - name: Generate release notes
   id: notes
-  uses: octopilot/octopilot-actions/release@main
+  uses: octopilot/actions/release@main
   env:
     OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
     ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}

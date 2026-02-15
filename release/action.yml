@@ -1,0 +1,38 @@
+name: 'Release notes'
+description: 'Generate release notes from commits since last tag using OpenAI or Anthropic (for GitHub Release body).'
+author: 'Octopilot'
+
+inputs:
+  version:
+    description: 'Release version (e.g. 1.2.3)'
+    required: true
+  since_tag:
+    description: 'Git ref (tag or commit) to list commits after. Default: previous tag from git describe'
+    required: false
+  template_path:
+    description: 'Path to a Markdown template (relative to repo root). Placeholder {{VERSION}} is replaced.'
+    required: false
+  template:
+    description: 'Inline template content. Ignored if template_path is set.'
+    required: false
+  provider:
+    description: 'AI provider: openai or anthropic'
+    required: false
+    default: 'anthropic'
+  model:
+    description: 'Model name (e.g. gpt-4o-mini, claude-sonnet-4-5-20250929). Optional; action uses defaults.'
+    required: false
+  output_filename:
+    description: 'Output file name under repo root (e.g. release-body.md)'
+    required: false
+    default: 'release_notes.md'
+
+outputs:
+  body_file:
+    description: 'Path to the generated release notes file (relative to repo root)'
+  body:
+    description: 'Release notes body content'
+
+runs:
+  using: 'docker'
+  image: 'Dockerfile'
