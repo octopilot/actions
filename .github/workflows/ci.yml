@@ -47,7 +47,7 @@ jobs:
         uses: docker/build-push-action@v6
         with:
           context: .
-          file: actions/release/Dockerfile
+          file: release/Dockerfile
           push: false
           tags: octopilot-actions-release:test
           cache-from: type=gha
