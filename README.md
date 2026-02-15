@@ -1,53 +1,51 @@
-# octopilot-actions
+# octopilot/actions
 
-Project-agnostic GitHub Actions for organisations adopting [Octopilot](https://github.com/octopilot). One repository, multiple actions (monorepo).
-
-## Shared code and testing
-
-- **`common/`** — Shared Python package used by actions (e.g. release notes generation). Edit here; actions import from `common`.
-- **Tests** — `tests/` contains unit tests (pytest). Run from repo root:
-  ```bash
-  pip install -e ./common pytest pytest-cov
-  PYTHONPATH=common pytest tests/ -v
-  ```
-- **CI** — `.github/workflows/ci.yml` runs tests and builds the release action Docker image from repo root (so `common/` is included in the image).
+Official GitHub Actions for the Octopilot ecosystem. This monorepo contains a suite of actions designed to automate GitOps workflows, secret management, and Kubernetes operations.
 
 ## Actions
 
 | Action | Description |
 |--------|-------------|
-| [**release**](release/README.md) | Generate release notes from commits since last tag using OpenAI or Anthropic; outputs body for GitHub Release. |
+| [**setup-tools**](setup-tools/README.md) | Installs standard DevOps CLIs: `kubectl`, `sops`, `kustomize`, and `yq`. |
+| [**sops-decrypt**](sops-decrypt/README.md) | Decrypts SOPS-encrypted files (YAML, JSON, dotenv) using GPG or AGE keys. |
+| [**rotate-secret**](rotate-secret/README.md) | Securely rotates GitHub repository secrets using LibSodium encryption. |
+| [**release**](release/README.md) | Generates AI-summarized release notes from commit history. |
+| [**kubernetes-auth**](kubernetes-auth/README.md) | Authenticates with Kubernetes using OIDC (ROPC flow) and sets up `kubeconfig`. |
+| [**gke-allow-runner**](network-access/gke-allow-runner/README.md) | Whitelists GitHub Runner IPs in GKE Control Plane authorized networks. |
+| [**eks-allow-runner**](network-access/eks-allow-runner/README.md) | Whitelists GitHub Runner IPs in AWS EKS public access CIDRs. |
+| [**aks-allow-runner**](network-access/aks-allow-runner/README.md) | Whitelists GitHub Runner IPs in Azure AKS API Server authorized IP ranges. |
 
-## Usage (caller workflow)
+## Usage
 
-Use the **caller pattern**: your repo has a thin workflow that `uses` the reusable workflow from your custom-workflows repo (e.g. `octopilot/sample-custom-workflows`). The reusable workflow can in turn use these actions so you don't need per-repo Python tooling for release notes.
+Each action is standalone and can be used directly in your workflows. Please refer to the specific README linked above for inputs, outputs, and examples.
 
-Example step using the release action directly:
+Example usage format:
 
 ```yaml
-- name: Generate release notes
-  id: notes
-  uses: octopilot/actions/release@main
-  env:
-    OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-    ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-  with:
-    version: ${{ steps.bump.outputs.version }}
-    provider: anthropic
-    template_path: .github/release-notes-template.md
-    output_filename: release-body.md
-- name: Create GitHub Release
-  uses: softprops/action-gh-release@v2
-  with:
-    tag_name: "v${{ steps.bump.outputs.version }}"
-    body_path: ${{ steps.notes.outputs.body_file }}
-    generate_release_notes: false
+uses: octopilot/actions/<action-name>@main
 ```
 
-## Design
+## Development
 
-- **Monolith:** Multiple actions live in this repo under `<name>/`. Each action is self-contained (Docker or composite).
-- **Python for v1:** Release notes use Python in a Docker action to reuse battle-tested logic; no per-repo `pip install -e ./tooling` required.
-- **Secrets:** Actions document required secrets (e.g. `OPENAI_API_KEY`, `ANTHROPIC_API_KEY` for release notes).
+This is a monorepo. Shared code lives in `common/`.
 
-See [AUDIT-TOOLING-OCTOPILOT-ACTIONS](../octopilot-probot/docs/AUDIT-TOOLING-OCTOPILOT-ACTIONS.md) in octopilot-probot for the audit that led to this layout.
+### Testing
+
+We use `pytest` for unit testing. To run tests locally:
+
+```bash
+# Install dependencies
+pip install -e ./common pytest pytest-cov ruff
+
+# Run tests
+PYTHONPATH=common pytest tests/ -v
+```
+
+### Linting
+
+We use `ruff` for linting and formatting:
+
+```bash
+ruff check .
+ruff format --check .
+```
