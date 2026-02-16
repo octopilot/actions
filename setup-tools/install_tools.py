@@ -28,14 +28,40 @@ def install_tool(name, version, url_template):
     pass
 
 
-def install_kubectl(version, install_dir):
+def get_host_info():
+    """
+    Returns normalized (system, arch) tuple.
+    system: linux, darwin
+    arch: amd64, arm64, arm
+    """
     system = platform.system().lower()
-    arch = platform.machine().lower()
+    machine = platform.machine().lower()
 
-    if arch == "x86_64":
+    if system == "darwin":
+        system = "darwin"
+    elif system == "linux":
+        system = "linux"
+
+    # Normalize architecture
+    if machine == "x86_64":
         arch = "amd64"
-    elif arch == "aarch64":
+    elif machine in ("aarch64", "arm64"):
         arch = "arm64"
+    elif machine.startswith("armv7"):
+        arch = "arm"
+    else:
+        # Fallback for other architectures if needed, but for now stick to machine
+        arch = machine
+
+    return system, arch
+
+
+def install_kubectl(version, install_dir):
+    system, arch = get_host_info()
+
+    # kubectl uses 'arm' for armv7, 'arm64' for aarch64
+    # https://dl.k8s.io/release/v1.29.1/bin/linux/arm64/kubectl
+    # https://dl.k8s.io/release/v1.29.1/bin/linux/arm/kubectl
 
     url = f"https://dl.k8s.io/release/v{version}/bin/{system}/{arch}/kubectl"
     dest = os.path.join(install_dir, "kubectl")
@@ -46,15 +72,13 @@ def install_kubectl(version, install_dir):
 
 
 def install_sops(version, install_dir):
-    system = platform.system().lower()
-    arch = platform.machine().lower()
-
-    if arch == "x86_64":
-        arch = "amd64"
+    system, arch = get_host_info()
 
     # sops releases:
     # linux: sops-v3.8.1.linux.amd64
     # darwin: sops-v3.8.1.darwin.amd64
+    # arm64: sops-v3.8.1.linux.arm64
+    # armv7: sops-v3.8.1.linux.arm
 
     filename = f"sops-v{version}.{system}.{arch}"
     url = f"https://github.com/getsops/sops/releases/download/v{version}/{filename}"
@@ -66,14 +90,14 @@ def install_sops(version, install_dir):
 
 
 def install_kustomize(version, install_dir):
-    system = platform.system().lower()
-    arch = platform.machine().lower()
+    system, arch = get_host_info()
 
-    if arch == "x86_64":
-        arch = "amd64"
-
-    # kustomize releases are tar.gz usually
-    # https://github.com/kubernetes-sigs/kustomize/releases/download/kustomize%2Fv5.3.0/kustomize_v5.3.0_darwin_amd64.tar.gz
+    # kustomize releases:
+    # kustomize_v5.3.0_linux_amd64.tar.gz
+    # kustomize_v5.3.0_linux_arm64.tar.gz
+    # kustomize_v5.3.0_linux_arm.tar.gz
+    # kustomize_v5.3.0_darwin_amd64.tar.gz
+    # kustomize_v5.3.0_darwin_arm64.tar.gz
 
     os_name = "darwin" if system == "darwin" else "linux"
 
@@ -90,13 +114,14 @@ def install_kustomize(version, install_dir):
 
 
 def install_yq(version, install_dir):
-    system = platform.system().lower()
-    arch = platform.machine().lower()
+    system, arch = get_host_info()
 
-    if arch == "x86_64":
-        arch = "amd64"
-
-    # https://github.com/mikefarah/yq/releases/download/v4.40.5/yq_linux_amd64
+    # yq releases:
+    # yq_linux_amd64
+    # yq_linux_arm64
+    # yq_linux_arm (armv7)
+    # yq_darwin_amd64
+    # yq_darwin_arm64
 
     binary_name = f"yq_{system}_{arch}"
     url = f"https://github.com/mikefarah/yq/releases/download/v{version}/{binary_name}"
