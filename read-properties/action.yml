@@ -1,0 +1,19 @@
+name: 'read-properties'
+description: 'Read a properties file and export variables to GITHUB_ENV'
+inputs:
+  file:
+    description: 'Path to the properties file'
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Read Properties
+      shell: bash
+      env:
+        INPUT_FILE: ${{ inputs.file }}
+      run: python ${{ github.action_path }}/read_properties.py
