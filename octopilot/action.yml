@@ -9,10 +9,14 @@ inputs:
     description: 'Arguments for the command'
     required: false
     default: ''
+  path:
+    description: 'Path to the project (directory containing skaffold.yaml)'
+    required: false
+    default: '/github/workspace'
 runs:
   using: 'docker'
   image: 'docker://ghcr.io/octopilot/octopilot-pipeline-tools/octopilot-pipeline-tools:latest'
   entrypoint: '/bin/sh'
   args:
     - '-c'
-    - 'echo "DEBUG: GITHUB_WORKSPACE=$GITHUB_WORKSPACE" && echo "DEBUG: Initial pwd=$(pwd)" && ls -la && cd $GITHUB_WORKSPACE && echo "DEBUG: Pwd after cd=$(pwd)" && ls -la && op ${{ inputs.command }} ${{ inputs.args }}'
+    - 'cd ${{ inputs.path }} && op ${{ inputs.command }} ${{ inputs.args }}'

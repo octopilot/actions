@@ -20,3 +20,4 @@ steps:
 |-------|-------------|---------|
 | `command` | The `op` command to execute (e.g. `build`, `version`). | `help` |
 | `args` | Additional arguments for the command. | `""` |
+| `path` | Path to the project root (containing `skaffold.yaml`). | `/github/workspace` |
