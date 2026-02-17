@@ -18,6 +18,11 @@ runs:
       run: |
         # Fetch tags (shallow clones might need this)
         git fetch --tags --force
+        # Ensure we have enough history to find the previous tag
+        # If shallow, deepen it. If not shallow, this is harmless.
+        if [ -f .git/shallow ]; then
+           git fetch --deepen=100 origin || true
+        fi
         
         target="HEAD"
         # If current commit is a tag, we want the *previous* one, so start searching from parent

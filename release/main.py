@@ -21,6 +21,14 @@ def main() -> None:
         sys.exit(1)
     project_root = Path(workspace)
 
+    # Workaround for "dubious ownership" error in GitHub Actions
+    import subprocess
+
+    try:
+        subprocess.run(["git", "config", "--global", "--add", "safe.directory", "/github/workspace"], check=True)
+    except Exception as e:
+        print(f"Warning: Failed to set safe.directory: {e}", file=sys.stderr)
+
     version = _input("version")
     if not version:
         print("Input 'version' is required.", file=sys.stderr)

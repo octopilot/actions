@@ -4,7 +4,7 @@ WORKDIR /action
 
 # Install git (often needed for setuptools_scm or just general utility)
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
-RUN git config --global --add safe.directory /github/workspace
+RUN git config --system --add safe.directory /github/workspace
 
 # Copy common module
 COPY common /action/common

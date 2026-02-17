@@ -4,7 +4,7 @@ WORKDIR /action
 
 # Install git and curl/wget for downloading sops
 RUN apt-get update && apt-get install -y --no-install-recommends git curl ca-certificates && rm -rf /var/lib/apt/lists/*
-RUN git config --global --add safe.directory /github/workspace
+RUN git config --system --add safe.directory /github/workspace
 
 # Install SOPS
 # Using v3.9.0 as a stable recent version
