@@ -234,6 +234,85 @@ def replace_version_in_file_gradle(path: Path, old: str, new: str, filename: str
         return True
     return False
 
+def get_current_version_node(content: str) -> str:
+    # "version": "1.2.3"
+    match = re.search(r'"version"\s*:\s*"(.*?)"', content)
+    if not match:
+        raise ValueError("Could not find 'version' in package.json")
+    return match.group(1)
+
+def replace_version_in_file_node(path: Path, old: str, new: str) -> bool:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception as e:
+        print(f"Warning: Could not read {path}: {e}", file=sys.stderr)
+        return False
+        
+    pat = r'("version"\s*:\s*")' + re.escape(old) + r'(")'
+    if re.search(pat, text):
+        new_content = re.sub(pat, lambda m: m.group(1) + new + m.group(2), text, count=1)
+        if text != new_content:
+            path.write_text(new_content, encoding="utf-8")
+            return True
+    return False
+
+def get_current_version_python(content: str) -> str:
+    # pyproject.toml: version = "1.2.3"
+    match = re.search(r'^version\s*=\s*"(.*?)"', content, re.MULTILINE)
+    if not match:
+        raise ValueError("Could not find 'version' in pyproject.toml")
+    return match.group(1)
+
+def replace_version_in_file_python(path: Path, old: str, new: str) -> bool:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception as e:
+        print(f"Warning: Could not read {path}: {e}", file=sys.stderr)
+        return False
+        
+    pat = r'^(version\s*=\s*")' + re.escape(old) + r'(")'
+    if re.search(pat, text, re.MULTILINE):
+        new_content = re.sub(pat, lambda m: m.group(1) + new + m.group(2), text, count=1, flags=re.MULTILINE)
+        if text != new_content:
+            path.write_text(new_content, encoding="utf-8")
+            return True
+    return False
+
+def get_current_version_dotnet(content: str) -> str:
+    # <Version>1.2.3</Version>
+    match = re.search(r'<Version>(.*?)</Version>', content)
+    if not match:
+        raise ValueError("Could not find <Version> in .csproj")
+    return match.group(1)
+
+def replace_version_in_file_dotnet(path: Path, old: str, new: str) -> bool:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception as e:
+        print(f"Warning: Could not read {path}: {e}", file=sys.stderr)
+        return False
+        
+    pat = r'(<Version>)' + re.escape(old) + r'(</Version>)'
+    if re.search(pat, text):
+        new_content = re.sub(pat, lambda m: m.group(1) + new + m.group(2), text, count=1)
+        if text != new_content:
+            path.write_text(new_content, encoding="utf-8")
+            return True
+    return False
+
+def get_current_version_text(content: str) -> str:
+    # First line, stripped
+    return content.strip().splitlines()[0]
+
+def replace_version_in_file_text(path: Path, old: str, new: str) -> bool:
+    # Simply overwrite with new version
+    try:
+        path.write_text(new, encoding="utf-8")
+        return True
+    except Exception as e:
+        print(f"Warning: Could not read {path}: {e}", file=sys.stderr)
+        return False
+
 def _cargo_toml_paths(project_root: Path) -> list[Path]:
     out = []
     # Use Path.rglob which is available in Python 3.12 (action uses 3.12)
@@ -270,6 +349,22 @@ def main():
                      file_path_str = "build.gradle.kts"
                 else:
                      file_path_str = "build.gradle"
+        elif mode == "node":
+            file_path_str = "package.json"
+        elif mode == "python":
+            file_path_str = "pyproject.toml"
+        elif mode == "dotnet":
+            # Start with reasonable default, but usually needs explicit path or glob
+            # We will try to find ONE .csproj if not provided?
+            # For robustness, user should provide file, but we can try globbing current dir for *.csproj
+            csprojs = list(Path.cwd().glob("*.csproj"))
+            if len(csprojs) == 1:
+                file_path_str = str(csprojs[0])
+            else:
+                print("Error: For dotnet mode, input 'file' is required unless there is exactly one .csproj in root.", file=sys.stderr)
+                sys.exit(1)
+        elif mode == "text":
+            file_path_str = "VERSION"
             
     file_path = Path(file_path_str)
     if not file_path.is_file():
@@ -289,6 +384,14 @@ def main():
             current_version = get_current_version_maven(content)
         elif mode == "gradle":
             current_version = get_current_version_gradle(content, file_path.name)
+        elif mode == "node":
+            current_version = get_current_version_node(content)
+        elif mode == "python":
+            current_version = get_current_version_python(content)
+        elif mode == "dotnet":
+            current_version = get_current_version_dotnet(content)
+        elif mode == "text":
+            current_version = get_current_version_text(content)
         else:
             print(f"Error: Unsupported mode '{mode}'", file=sys.stderr)
             sys.exit(1)
@@ -311,6 +414,18 @@ def main():
              updated_files.append(file_path)
     elif mode == "gradle":
         if replace_version_in_file_gradle(file_path, current_version, new_version, file_path.name):
+             updated_files.append(file_path)
+    elif mode == "node":
+        if replace_version_in_file_node(file_path, current_version, new_version):
+             updated_files.append(file_path)
+    elif mode == "python":
+        if replace_version_in_file_python(file_path, current_version, new_version):
+             updated_files.append(file_path)
+    elif mode == "dotnet":
+        if replace_version_in_file_dotnet(file_path, current_version, new_version):
+             updated_files.append(file_path)
+    elif mode == "text":
+        if replace_version_in_file_text(file_path, current_version, new_version):
              updated_files.append(file_path)
     elif mode == "rust":
         # For Rust, we walk the whole workspace

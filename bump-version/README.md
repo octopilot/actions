@@ -8,6 +8,10 @@ Bumps semantic version in project files.
 -   **Rust**: Updates `version = "x.y.z"` in `Cargo.toml`.
 -   **Maven**: Updates `<version>x.y.z</version>` in `pom.xml`.
 -   **Gradle**: Updates `version=x.y.z` in `gradle.properties` or `version = 'x.y.z'` in `build.gradle`.
+-   **Node.js**: Updates `"version": "x.y.z"` in `package.json`.
+-   **Python**: Updates `version = "x.y.z"` in `pyproject.toml`.
+-   **.NET**: Updates `<Version>x.y.z</Version>` in `*.csproj`.
+-   **Text**: Overwrites the file content with the new version string (e.g., `VERSION` file).
 
 ## Usage
 
@@ -15,7 +19,7 @@ Bumps semantic version in project files.
 - uses: octopilot/actions/bump-version@main
   id: bump
   with:
-    mode: go # go, rust, maven, gradle
+    mode: node # go, rust, maven, gradle, node, python, dotnet, text
     bump: minor
 ```
 
@@ -23,8 +27,8 @@ Bumps semantic version in project files.
 
 | Input | Description | Default |
 |-------|-------------|---------|
-| `mode` | `go`, `rust`, `maven`, `gradle` | `go` |
-| `bump` | `major`, `minor`, `patch` | `patch` |
+| `mode` | `go`, `rust`, `maven`, `gradle`, `node`, `python`, `dotnet`, `text` | `go` |
+| `bump` | `major`, `minor`, `patch`, `rc`, `release` | `patch` |
 | `file` | Path to version file. Auto-detected based on mode. | |
 
 ## Outputs

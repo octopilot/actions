@@ -108,3 +108,37 @@ def test_integration_invalid_bump_type(workspace):
     
     assert res.returncode != 0
     assert "Unknown bump type" in res.stderr
+
+def test_integration_node_package(workspace):
+    f = workspace / "package.json"
+    f.write_text('{\n  "name": "foo",\n  "version": "1.0.0"\n}', encoding="utf-8")
+    
+    res = run_bump_action(workspace, "node", "patch")
+    assert res.returncode == 0
+    assert '"version": "1.0.1"' in f.read_text(encoding="utf-8")
+
+def test_integration_python_pyproject(workspace):
+    f = workspace / "pyproject.toml"
+    f.write_text('[tool.poetry]\nname = "foo"\nversion = "0.1.0"\n', encoding="utf-8")
+    
+    res = run_bump_action(workspace, "python", "minor")
+    assert res.returncode == 0
+    assert 'version = "0.2.0"' in f.read_text(encoding="utf-8")
+
+def test_integration_dotnet_csproj(workspace):
+    f = workspace / "app.csproj"
+    content = '<Project Sdk="Microsoft.NET.Sdk">\n  <PropertyGroup>\n    <Version>1.0.0</Version>\n  </PropertyGroup>\n</Project>'
+    f.write_text(content, encoding="utf-8")
+    
+    # Auto-detect should work as it is the only csproj
+    res = run_bump_action(workspace, "dotnet", "major")
+    assert res.returncode == 0
+    assert '<Version>2.0.0</Version>' in f.read_text(encoding="utf-8")
+
+def test_integration_text_file(workspace):
+    f = workspace / "VERSION"
+    f.write_text("1.2.3", encoding="utf-8")
+    
+    res = run_bump_action(workspace, "text", "patch")
+    assert res.returncode == 0
+    assert "1.2.4" == f.read_text(encoding="utf-8")
