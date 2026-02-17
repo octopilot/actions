@@ -30,5 +30,6 @@ def main():
         # Fallback for local testing
         print(f"::set-output name=actions::{json.dumps(actions)}")
 
+
 if __name__ == "__main__":
     main()
