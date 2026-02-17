@@ -24,55 +24,56 @@ outputs:
 runs:
   using: "composite"
   steps:
-    # --- Install op ---
-    - name: Install Octopilot Pipeline Tools (op)
-      shell: bash
-      run: |
-        OP_VERSION="${{ inputs.op_version }}"
-        if [ "$OP_VERSION" == "latest" ]; then
-           OP_VERSION=$(curl -s https://api.github.com/repos/octopilot/octopilot-pipeline-tools/releases/latest | jq -r .tag_name)
-        fi
-        
-        echo "Installing op version: $OP_VERSION"
-        
-        ARCH="amd64"
-        if [ "$(uname -m)" == "aarch64" ]; then
-          ARCH="arm64"
-        fi
-        OS="linux"
-
-        URL="https://github.com/octopilot/octopilot-pipeline-tools/releases/download/${OP_VERSION}/op-${OS}-${ARCH}"
-        curl -L -o op "$URL"
-        chmod +x op
-        sudo mv op /usr/local/bin/op
-
     # --- Build & Push ---
     - name: Build and Push
       id: build
       shell: bash
+      env:
+        INPUT_TTL: ${{ inputs.ttl }}
+        INPUT_REGISTRY: ${{ inputs.registry }}
+        INPUT_PLATFORM: ${{ inputs.platform }}
+        INPUT_OP_VERSION: ${{ inputs.op_version }}
       run: |
         # Construct ephemeral tag
         SHORT_SHA=$(git rev-parse --short HEAD)
-        TTL="${{ inputs.ttl }}"
+        TTL="${INPUT_TTL}"
         
         REPO_NAME="${{ github.event.repository.name }}"
         OWNER="${{ github.repository_owner }}"
         
         # Default ephemeral registry strategy: ttl.sh/<owner>-<repo>-<short_sha>:<ttl>
-        if [ -z "${{ inputs.registry }}" ]; then
+        if [ -z "${INPUT_REGISTRY}" ]; then
           IMAGE_NAME="ttl.sh/${OWNER}-${REPO_NAME}-${SHORT_SHA}"
         else
-          IMAGE_NAME="${{ inputs.registry }}"
+          IMAGE_NAME="${INPUT_REGISTRY}"
         fi
         TAG="${TTL}"
         
         FULL_REF="${IMAGE_NAME}:${TAG}"
         echo "Building ephemeral image: $FULL_REF"
         
-        # Set DOCKER_METADATA_OUTPUT_VERSION to the tag (TTL) so `op` tags it correctly
-        export DOCKER_METADATA_OUTPUT_VERSION="${TAG}"
+        # Determine image tag
+        IMAGE_TAG="${INPUT_OP_VERSION}"
+        if [ "${IMAGE_TAG}" == "latest" ]; then
+           # If latest, we accept the latest tag (or we could resolve it, but docker latest is standard)
+           IMAGE_TAG="latest"
+        fi
         
-        # Run op build
-        op build --repo "${IMAGE_NAME}" --platform "${{ inputs.platform }}" --push
+        IMAGE="ghcr.io/octopilot/octopilot-pipeline-tools/octopilot-pipeline-tools:${IMAGE_TAG}"
+        echo "Using builder image: $IMAGE"
+
+        # Run op build in container
+        # We mount docker socket and workspace
+        # We explicitly set safe.directory because ownership might differ
+        docker run --rm \
+           -v /var/run/docker.sock:/var/run/docker.sock \
+           -v "$GITHUB_WORKSPACE:/workspace" \
+           -w "/workspace" \
+           -e DOCKER_METADATA_OUTPUT_VERSION="${TAG}" \
+           -e GITHUB_ACTIONS="true" \
+           -e CI="true" \
+           --entrypoint /bin/sh \
+           "$IMAGE" \
+           -c "git config --global --add safe.directory /workspace && op build --repo '${IMAGE_NAME}' --platform '${INPUT_PLATFORM}' --push"
         
         echo "image_ref=${FULL_REF}" >> $GITHUB_OUTPUT
