@@ -9,7 +9,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /
 
 COPY common /action/common
 COPY release/requirements.txt /action/requirements.txt
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir -r requirements.txt && pip install /action/common
 
 COPY release/main.py /action/main.py
 
