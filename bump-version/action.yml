@@ -29,7 +29,7 @@ runs:
 
     - name: Install dependencies
       shell: bash
-      run: pip install toml ${{ github.action_path }}/../common
+      run: pip install ${{ github.action_path }}/../common
 
     - name: Bump Version
       id: bump

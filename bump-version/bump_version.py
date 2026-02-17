@@ -1,118 +1,223 @@
+from __future__ import annotations
+
 import os
 import re
 import sys
-import toml
+from pathlib import Path
 
-def bump_version(version, bump_type):
-    major, minor, patch = map(int, version.split('.'))
-    if bump_type == 'major':
-        major += 1
-        minor = 0
-        patch = 0
-    elif bump_type == 'minor':
-        minor += 1
-        patch = 0
-    elif bump_type == 'patch':
-        patch += 1
-    else:
-        raise ValueError(f"Invalid bump type: {bump_type}")
-    return f"{major}.{minor}.{patch}"
+# Sections that define a package/workspace version we own (not [dependencies]).
+VERSION_SECTIONS = ("package", "workspace.package")
 
-def handle_go(file_path, bump_type):
-    if not os.path.exists(file_path):
-        print(f"Error: Go version file '{file_path}' not found.", file=sys.stderr)
+# Directory names to skip when walking for Cargo.toml.
+SKIP_PARTS = (
+    "target",
+    ".git",
+    ".venv",
+    "venv",
+    "env",
+    "__pycache__",
+    "node_modules",
+    "node_packages",
+    "build",
+    "dist",
+    "tmp",
+)
+
+def bump_semver(old: str, bump: str) -> str:
+    """Compute next version from old (X.Y.Z or X.Y.Z-rc.N or v-prefixed) and bump.
+    
+    Supported bumps: major, minor, patch, rc, release.
+    """
+    old = old.lstrip("v")
+    m = re.match(r"^(\d+)\.(\d+)\.(\d+)(?:-([\w.-]+))?$", old)
+    if not m:
+        print(f"Error: Invalid version format: {old}", file=sys.stderr)
         sys.exit(1)
-    
-    with open(file_path, 'r') as f:
-        content = f.read()
-    
+
+    x, y, z = int(m.group(1)), int(m.group(2)), int(m.group(3))
+    prerel = m.group(4)  # None or e.g. "rc.2"
+
+    b = (bump or "patch").lower()
+
+    if b == "rc":
+        if not prerel:
+            return f"{x}.{y}.{z}-rc.1"
+        m2 = re.match(r"^rc\.(\d+)$", prerel)
+        if not m2:
+            print(f"Error: rc bump only supports -rc.N prerelease; found -{prerel}", file=sys.stderr)
+            sys.exit(1)
+        return f"{x}.{y}.{z}-rc.{int(m2.group(1)) + 1}"
+
+    if b in ("release", "promote"):
+        if not prerel:
+            print(f"Error: Already a full release ({old}). Use patch, minor, or major to create a new version.", file=sys.stderr)
+            sys.exit(1)
+        return f"{x}.{y}.{z}"
+
+    if b == "patch":
+        z += 1
+    elif b == "minor":
+        y += 1
+        z = 0
+    elif b == "major":
+        x += 1
+        y = z = 0
+    else:
+        print(f"Error: Unknown bump type: {bump}", file=sys.stderr)
+        sys.exit(1)
+        
+    return f"{x}.{y}.{z}"
+
+def get_current_version_go(content: str) -> str:
     # Format: var Version = "0.1.0"
     match = re.search(r'var Version = "(.*?)"', content)
     if not match:
-        print(f"Error: Could not find version string in {file_path}", file=sys.stderr)
-        sys.exit(1)
-        
-    current_version = match.group(1)
-    new_version = bump_version(current_version, bump_type)
-    
-    new_content = content.replace(f'var Version = "{current_version}"', f'var Version = "{new_version}"')
-    
-    with open(file_path, 'w') as f:
-        f.write(new_content)
-        
-    return current_version, new_version
+        raise ValueError("Could not find 'var Version' string")
+    return match.group(1)
 
-def handle_rust(file_path, bump_type):
-    if not os.path.exists(file_path):
-        print(f"Error: Cargo.toml file '{file_path}' not found.", file=sys.stderr)
-        sys.exit(1)
-        
-    data = toml.load(file_path)
-    if 'package' not in data or 'version' not in data['package']:
-        print(f"Error: Could not find package version in {file_path}", file=sys.stderr)
-        sys.exit(1)
-        
-    current_version = data['package']['version']
-    # Handle potential pre-release suffix simply for now, assuming standard semver
-    if '-' in current_version:
-        current_version = current_version.split('-')[0]
-        
-    new_version = bump_version(current_version, bump_type)
-    
-    # Update TOML - using string replacement to preserve comments/formatting
-    # toml library might reformat properly, but simple replace covers most cases safely for top-level package version
-    # Searching specifically for version = "x.y.z" in [package] section is tricky with simple replace.
-    # Let's try partial read or regex. Cargo.toml usually puts version near the top.
-    
-    with open(file_path, 'r') as f:
-        content = f.read()
+def get_current_version_rust(content: str) -> str:
+    # Look for [package] or [workspace.package] followed by version = "..."
+    # This is a heuristic. For source of truth, we expect it in the [package] or [workspace.package] section.
+    # We will iterate lines to be safe.
+    lines = content.splitlines()
+    in_sec = False
+    for line in lines:
+        s = line.strip()
+        if s.startswith("["):
+            in_sec = s.strip("[]").strip() in VERSION_SECTIONS
+            continue
+        if in_sec:
+            m = re.match(r'^\s*version\s*=\s*"v?(\d+\.\d+\.\d+(?:-[\w.-]+)?)"', line)
+            if m:
+                return m.group(1)
+    raise ValueError("Could not find [package] version")
 
-    # Regex to match version = "x.y.z" inside [package] block is hard with just regex.
-    # Assuming standard format: version = "0.1.0"
-    # We replace the first occurrence which is usually package version.
-    
-    pattern = f'version = "{current_version}"'
-    if pattern not in content:
-         # Try with single quotes
-        pattern = f"version = '{current_version}'"
-        if pattern not in content:
-             print(f"Error: Could not find specific version string '{pattern}' in {file_path}", file=sys.stderr)
-             sys.exit(1)
-
-    new_content = content.replace(pattern, f'version = "{new_version}"', 1)
-    
-    with open(file_path, 'w') as f:
-        f.write(new_content)
+def replace_version_in_file(path: Path, old: str, new: str, mode: str) -> bool:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception as e:
+        print(f"Warning: Could not read {path}: {e}", file=sys.stderr)
+        return False
         
-    return current_version, new_version
+    if mode == "go":
+        # Simple replacement for Go
+        new_content = text.replace(f'var Version = "{old}"', f'var Version = "{new}"')
+        if text != new_content:
+            path.write_text(new_content, encoding="utf-8")
+            return True
+        return False
+
+    elif mode == "rust":
+        # Regex replacement for Rust [package] logic
+        lines = text.splitlines(keepends=True)
+        out = []
+        in_sec = False
+        replaced = False
+        for line in lines:
+            s = line.strip()
+            if s.startswith("["):
+                in_sec = s.strip("[]").strip() in VERSION_SECTIONS
+                out.append(line)
+                continue
+            if in_sec:
+                # Match version = "old" or "vold"
+                pat = r'(\s*version\s*=\s*")v?' + re.escape(old) + r'"'
+                if re.search(pat, line):
+                    new_line = re.sub(pat, lambda m: m.group(1) + new + '"', line, count=1)
+                    out.append(new_line)
+                    replaced = True
+                    continue
+            out.append(line)
+        
+        if replaced:
+            path.write_text("".join(out), encoding="utf-8")
+        return replaced
+        
+    return False
+
+def _cargo_toml_paths(project_root: Path) -> list[Path]:
+    out = []
+    # Use Path.rglob which is available in Python 3.12 (action uses 3.12)
+    # We need to manually filter skip parts
+    for p in project_root.rglob("Cargo.toml"):
+        try:
+            rel = p.relative_to(project_root)
+        except ValueError:
+            continue
+        if any(part in rel.parts for part in SKIP_PARTS):
+            continue
+        if p.is_file():
+            out.append(p)
+    return sorted(out)
 
 def main():
-    language = os.environ.get("INPUT_MODE", "go")
+    mode = os.environ.get("INPUT_MODE", "go")
     bump_type = os.environ.get("INPUT_BUMP", "patch")
-    file_path = os.environ.get("INPUT_FILE", "")
+    file_path_str = os.environ.get("INPUT_FILE", "")
     
-    if not file_path:
-        if language == "go":
-            file_path = "internal/cmd/version.go"
-        elif language == "rust":
-            file_path = "Cargo.toml"
-
-    print(f"Bumping {language} version in {file_path} ({bump_type})...")
-    
-    if language == "go":
-        old, new = handle_go(file_path, bump_type)
-    elif language == "rust":
-        old, new = handle_rust(file_path, bump_type)
-    else:
-        print(f"Error: Unsupported mode '{language}'", file=sys.stderr)
+    if not file_path_str:
+        if mode == "go":
+            file_path_str = "internal/cmd/version.go"
+        elif mode == "rust":
+            file_path_str = "Cargo.toml"
+            
+    file_path = Path(file_path_str)
+    if not file_path.is_file():
+        print(f"Error: Version file '{file_path}' not found.", file=sys.stderr)
         sys.exit(1)
         
-    print(f"Bumped from {old} to {new}")
+    print(f"Reading current version from {file_path}...")
+    content = file_path.read_text(encoding="utf-8")
     
+    try:
+        if mode == "go":
+            current_version = get_current_version_go(content)
+        elif mode == "rust":
+            current_version = get_current_version_rust(content)
+        else:
+            print(f"Error: Unsupported mode '{mode}'", file=sys.stderr)
+            sys.exit(1)
+    except ValueError as e:
+        print(f"Error: {e}", file=sys.stderr)
+        sys.exit(1)
+        
+    print(f"Current version: {current_version}")
+    
+    new_version = bump_semver(current_version, bump_type)
+    print(f"Target version: {new_version} ({bump_type})")
+    
+    updated_files = []
+    
+    if mode == "go":
+        if replace_version_in_file(file_path, current_version, new_version, mode):
+            updated_files.append(file_path)
+    elif mode == "rust":
+        # For Rust, we walk the whole workspace
+        project_root = Path.cwd()
+        # First ensure we update the source of truth file
+        if replace_version_in_file(file_path, current_version, new_version, mode):
+             updated_files.append(file_path)
+
+        # Then walk others
+        print(f"Scanning workspace for Cargo.toml files to update...")
+        for p in _cargo_toml_paths(project_root):
+             if p.resolve() == file_path.resolve():
+                 continue # Already processed
+             
+             if replace_version_in_file(p, current_version, new_version, mode):
+                 updated_files.append(p)
+                 
+    if not updated_files:
+        print("Warning: No files were updated.", file=sys.stderr)
+    else:
+        print(f"Updated {len(updated_files)} files:")
+        for p in updated_files:
+            print(f"  {p}")
+            
     if "GITHUB_OUTPUT" in os.environ:
         with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-            f.write(f"old_version={old}\n")
-            f.write(f"version={new}\n")
+            f.write(f"old_version={current_version}\n")
+            f.write(f"version={new_version}\n")
 
 if __name__ == "__main__":
     main()
