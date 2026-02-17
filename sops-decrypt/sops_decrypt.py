@@ -93,7 +93,7 @@ def decrypt_file():
                     with open(env_file, "a") as f:
                         for key, value in data.items():
                             # Handle complex types by converting to string or skipping
-                            if isinstance(value, (dict, list)):
+                            if isinstance(value, dict | list):
                                 print(f"Warning: Skipping complex type for key {key}", file=sys.stderr)
                                 continue
                             f.write(f"{key}={value}\n")
@@ -107,7 +107,7 @@ def decrypt_file():
                     data = yaml.safe_load(decrypted_data)
                     with open(env_file, "a") as f:
                         for key, value in data.items():
-                            if isinstance(value, (dict, list)):
+                            if isinstance(value, dict | list):
                                 print(f"Warning: Skipping complex type for key {key}", file=sys.stderr)
                                 continue
                             f.write(f"{key}={value}\n")

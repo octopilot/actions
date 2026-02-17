@@ -1,8 +1,8 @@
+import os
 import re
 import sys
-import os
+
 import pytest
-from pathlib import Path
 
 # Add bump-version directory to sys.path so we can import bump_version
 sys.path.append(os.path.join(os.path.dirname(__file__), '../../bump-version'))
@@ -55,7 +55,7 @@ def test_get_current_version_go_error():
 def test_replace_version_in_file_go(tmp_path):
     f = tmp_path / "version.go"
     f.write_text('package cmd\n\nvar Version = "0.1.0"\n', encoding="utf-8")
-    
+
     assert bump_version.replace_version_in_file(f, "0.1.0", "0.1.1", "go") is True
     assert f.read_text(encoding="utf-8") == 'package cmd\n\nvar Version = "0.1.1"\n'
 
@@ -87,9 +87,9 @@ edition = "2021"
 bar = "1.0.0"
 """
     f.write_text(content, encoding="utf-8")
-    
+
     assert bump_version.replace_version_in_file(f, "0.1.0", "0.1.1", "rust") is True
-    
+
     new_content = f.read_text(encoding="utf-8")
     assert 'version = "0.1.1"' in new_content
     # Dependencies should be untouched
@@ -105,7 +105,7 @@ version = "0.1.0"
 authors = ["me"]
 """
     f.write_text(content, encoding="utf-8")
-    
+
     assert bump_version.replace_version_in_file(f, "0.1.0", "0.2.0", "rust") is True
     assert 'version = "0.2.0"' in f.read_text(encoding="utf-8")
 
@@ -119,7 +119,7 @@ version = "0.1.0"
 foo = { workspace = true }
 """
     f.write_text(content, encoding="utf-8")
-    
+
     # Member should update if it matches old version
     assert bump_version.replace_version_in_file(f, "0.1.0", "0.1.1", "rust") is True
     assert 'version = "0.1.1"' in f.read_text(encoding="utf-8")
@@ -131,7 +131,7 @@ name = "crate-b"
 version = "0.0.1" # Distinct version
 """
     f.write_text(content, encoding="utf-8")
-    
+
     # Member should NOT update if version differs
     assert bump_version.replace_version_in_file(f, "0.1.0", "0.1.1", "rust") is False
     assert 'version = "0.0.1"' in f.read_text(encoding="utf-8")
@@ -143,7 +143,7 @@ def test_cargo_toml_paths_filtering(tmp_path):
     (tmp_path / "Cargo.toml").touch()
     (tmp_path / "sub").mkdir()
     (tmp_path / "sub/Cargo.toml").touch()
-    
+
     # Create ignored paths
     (tmp_path / "target").mkdir()
     (tmp_path / "target/Cargo.toml").touch()
@@ -151,11 +151,11 @@ def test_cargo_toml_paths_filtering(tmp_path):
     (tmp_path / ".git/Cargo.toml").touch()
     (tmp_path / "node_modules").mkdir()
     (tmp_path / "node_modules/Cargo.toml").touch()
-    
+
     paths = bump_version._cargo_toml_paths(tmp_path)
     # convert to relative strings for checking
     rel_paths = [str(p.relative_to(tmp_path)) for p in paths]
-    
+
     assert "Cargo.toml" in rel_paths
     assert "sub/Cargo.toml" in rel_paths
     assert "target/Cargo.toml" not in rel_paths
@@ -198,20 +198,21 @@ def test_replace_version_in_file_maven(tmp_path):
 </project>
 """
     f.write_text(content, encoding="utf-8")
-    
+
     assert bump_version.replace_version_in_file_maven(f, "1.0.0", "1.0.1") is True
-    
+
     new_content = f.read_text(encoding="utf-8")
     # Should replace the FIRST occurrence (project version)
     assert '<version>1.0.1</version>' in new_content
-    # Dependency version usually appears later, but if it matches old version it MIGHT get replaced if we aren't careful.
+    # Dependency version usually appears later, but if it matches old version
+    # it MIGHT get replaced if we aren't careful.
     # Our regex logic replaces the FIRST occurrence.
     # In standard POM, project version comes before dependencies.
     # So the dependency version "1.0.0" should remain "1.0.0" if it was distinct, but here it is same.
     # `re.sub(..., count=1)` ensures only the first one found is replaced.
     # Check that dependency is UNCHANGED if it appears after.
     # Python re.sub replaces from left to right.
-    
+
     # We expect 'version>1.0.1<' at the top, and 'version>1.0.0<' inside dependency
     matches = list(re.finditer(r'<version>(.*?)</version>', new_content))
     assert len(matches) >= 2
@@ -231,17 +232,17 @@ def test_get_current_version_gradle_build_groovy():
 def test_get_current_version_gradle_build_kotlin():
     content = 'version = "0.1.0-rc.1"'
     assert bump_version.get_current_version_gradle(content, "build.gradle.kts") == "0.1.0-rc.1"
-    
+
 def test_replace_version_in_file_gradle_properties(tmp_path):
     f = tmp_path / "gradle.properties"
     f.write_text("version=1.2.3\nfoo=bar", encoding="utf-8")
-    
+
     assert bump_version.replace_version_in_file_gradle(f, "1.2.3", "1.2.4", f.name) is True
     assert f.read_text(encoding="utf-8") == "version=1.2.4\nfoo=bar"
 
 def test_replace_version_in_file_gradle_build(tmp_path):
     f = tmp_path / "build.gradle"
     f.write_text("group 'com.example'\nversion = '1.0.0'\n", encoding="utf-8")
-    
+
     assert bump_version.replace_version_in_file_gradle(f, "1.0.0", "1.1.0", f.name) is True
     assert "version = '1.1.0'" in f.read_text(encoding="utf-8")

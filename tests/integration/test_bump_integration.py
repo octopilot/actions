@@ -1,9 +1,8 @@
 import os
-import shutil
 import subprocess
 import sys
+
 import pytest
-from pathlib import Path
 
 # Path to the script under test
 BUMP_SCRIPT = os.path.abspath(os.path.join(os.path.dirname(__file__), '../../bump-version/bump_version.py'))
@@ -14,7 +13,7 @@ def run_bump_action(cwd, mode, bump, file_path=None):
     env["INPUT_BUMP"] = bump
     if file_path:
         env["INPUT_FILE"] = str(file_path)
-    
+
     # Capture output for debugging
     result = subprocess.run(
         [sys.executable, BUMP_SCRIPT],
@@ -36,30 +35,34 @@ def test_integration_go_default(workspace):
     tgt.mkdir(parents=True)
     f = tgt / "version.go"
     f.write_text('package cmd\n\nvar Version = "0.1.0"\n', encoding="utf-8")
-    
+
     # Run
     res = run_bump_action(workspace, "go", "patch")
-    
+
     assert res.returncode == 0
-    assert 'package cmd\n\nvar Version = "0.1.1"\n' == f.read_text(encoding="utf-8")
+    assert f.read_text(encoding="utf-8") == 'package cmd\n\nvar Version = "0.1.1"\n'
 
 def test_integration_go_custom_file(workspace):
     f = workspace / "main.go"
     f.write_text('var Version = "1.0.0"', encoding="utf-8")
-    
+
     res = run_bump_action(workspace, "go", "minor", file_path="main.go")
-    
+
     assert res.returncode == 0
-    assert 'var Version = "1.1.0"' == f.read_text(encoding="utf-8")
+    assert f.read_text(encoding="utf-8") == 'var Version = "1.1.0"'
 
 def test_integration_rust_workspace(workspace):
     # Create workspace layout
-    (workspace / "Cargo.toml").write_text('[workspace]\nmembers=["a"]\n[workspace.package]\nversion="0.1.0"', encoding="utf-8")
+    (workspace / "Cargo.toml").write_text(
+        '[workspace]\nmembers=["a"]\n[workspace.package]\nversion="0.1.0"', encoding="utf-8"
+    )
     (workspace / "a").mkdir()
-    (workspace / "a/Cargo.toml").write_text('[package]\nname="a"\nversion="0.1.0"\n[dependencies]\nfoo="1.0"', encoding="utf-8")
-    
+    (workspace / "a/Cargo.toml").write_text(
+        '[package]\nname="a"\nversion="0.1.0"\n[dependencies]\nfoo="1.0"', encoding="utf-8"
+    )
+
     res = run_bump_action(workspace, "rust", "minor")
-    
+
     assert res.returncode == 0
     assert 'version="0.2.0"' in (workspace / "Cargo.toml").read_text(encoding="utf-8")
     assert 'version="0.2.0"' in (workspace / "a/Cargo.toml").read_text(encoding="utf-8")
@@ -73,30 +76,30 @@ def test_integration_maven_pom(workspace):
   <version>1.0.0</version>
 </project>"""
     f.write_text(content, encoding="utf-8")
-    
+
     res = run_bump_action(workspace, "maven", "patch")
-    
+
     assert res.returncode == 0
     assert '<version>1.0.1</version>' in f.read_text(encoding="utf-8")
 
 def test_integration_gradle_properties(workspace):
     f = workspace / "gradle.properties"
     f.write_text("version=1.2.3", encoding="utf-8")
-    
+
     res = run_bump_action(workspace, "gradle", "major")
-    
+
     assert res.returncode == 0
-    assert "version=2.0.0" == f.read_text(encoding="utf-8")
+    assert f.read_text(encoding="utf-8") == "version=2.0.0"
 
 def test_integration_gradle_build(workspace):
     f = workspace / "build.gradle"
     f.write_text("version = '0.0.1'", encoding="utf-8")
-    
+
     # Auto-detect should pick up build.gradle if gradle.properties is missing
     res = run_bump_action(workspace, "gradle", "patch")
-    
+
     assert res.returncode == 0
-    assert "version = '0.0.2'" == f.read_text(encoding="utf-8")
+    assert f.read_text(encoding="utf-8") == "version = '0.0.2'"
 
 def test_integration_invalid_bump_type(workspace):
     tgt = workspace / "internal/cmd"
@@ -105,14 +108,14 @@ def test_integration_invalid_bump_type(workspace):
     f.write_text('package cmd\n\nvar Version = "0.1.0"\n', encoding="utf-8")
 
     res = run_bump_action(workspace, "go", "unknown")
-    
+
     assert res.returncode != 0
     assert "Unknown bump type" in res.stderr
 
 def test_integration_node_package(workspace):
     f = workspace / "package.json"
     f.write_text('{\n  "name": "foo",\n  "version": "1.0.0"\n}', encoding="utf-8")
-    
+
     res = run_bump_action(workspace, "node", "patch")
     assert res.returncode == 0
     assert '"version": "1.0.1"' in f.read_text(encoding="utf-8")
@@ -120,16 +123,22 @@ def test_integration_node_package(workspace):
 def test_integration_python_pyproject(workspace):
     f = workspace / "pyproject.toml"
     f.write_text('[tool.poetry]\nname = "foo"\nversion = "0.1.0"\n', encoding="utf-8")
-    
+
     res = run_bump_action(workspace, "python", "minor")
     assert res.returncode == 0
     assert 'version = "0.2.0"' in f.read_text(encoding="utf-8")
 
 def test_integration_dotnet_csproj(workspace):
     f = workspace / "app.csproj"
-    content = '<Project Sdk="Microsoft.NET.Sdk">\n  <PropertyGroup>\n    <Version>1.0.0</Version>\n  </PropertyGroup>\n</Project>'
+    content = (
+        '<Project Sdk="Microsoft.NET.Sdk">\n'
+        '  <PropertyGroup>\n'
+        '    <Version>1.0.0</Version>\n'
+        '  </PropertyGroup>\n'
+        "</Project>"
+    )
     f.write_text(content, encoding="utf-8")
-    
+
     # Auto-detect should work as it is the only csproj
     res = run_bump_action(workspace, "dotnet", "major")
     assert res.returncode == 0
@@ -138,7 +147,7 @@ def test_integration_dotnet_csproj(workspace):
 def test_integration_text_file(workspace):
     f = workspace / "VERSION"
     f.write_text("1.2.3", encoding="utf-8")
-    
+
     res = run_bump_action(workspace, "text", "patch")
     assert res.returncode == 0
-    assert "1.2.4" == f.read_text(encoding="utf-8")
+    assert f.read_text(encoding="utf-8") == "1.2.4"

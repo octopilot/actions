@@ -25,7 +25,7 @@ SKIP_PARTS = (
 
 def bump_semver(old: str, bump: str) -> str:
     """Compute next version from old (X.Y.Z or X.Y.Z-rc.N or v-prefixed) and bump.
-    
+
     Supported bumps: major, minor, patch, rc, release.
     """
     old = old.lstrip("v")
@@ -50,7 +50,10 @@ def bump_semver(old: str, bump: str) -> str:
 
     if b in ("release", "promote"):
         if not prerel:
-            print(f"Error: Already a full release ({old}). Use patch, minor, or major to create a new version.", file=sys.stderr)
+            print(
+                f"Error: Already a full release ({old}). Use patch, minor, or major to create a new version.",
+                file=sys.stderr,
+            )
             sys.exit(1)
         return f"{x}.{y}.{z}"
 
@@ -65,7 +68,7 @@ def bump_semver(old: str, bump: str) -> str:
     else:
         print(f"Error: Unknown bump type: {bump}", file=sys.stderr)
         sys.exit(1)
-        
+
     return f"{x}.{y}.{z}"
 
 def get_current_version_go(content: str) -> str:
@@ -98,7 +101,7 @@ def replace_version_in_file(path: Path, old: str, new: str, mode: str) -> bool:
     except Exception as e:
         print(f"Warning: Could not read {path}: {e}", file=sys.stderr)
         return False
-        
+
     if mode == "go":
         # Simple replacement for Go
         new_content = text.replace(f'var Version = "{old}"', f'var Version = "{new}"')
@@ -128,11 +131,11 @@ def replace_version_in_file(path: Path, old: str, new: str, mode: str) -> bool:
                     replaced = True
                     continue
             out.append(line)
-        
+
         if replaced:
             path.write_text("".join(out), encoding="utf-8")
         return replaced
-        
+
     return False
 
 def get_current_version_maven(content: str) -> str:
@@ -140,30 +143,30 @@ def get_current_version_maven(content: str) -> str:
     # Simple regex approach: find the first <version> tag that is NOT inside a <dependency>, <parent>, or <plugin>.
     # However, standard practice is <project>...<version>X.Y.Z</version>...
     # We will look for <version> at the top level of project.
-    # A safe heuristic for simple poms: The project version is usually the first <version> tag, 
+    # A safe heuristic for simple poms: The project version is usually the first <version> tag,
     # unless there is a <parent> tag. If there is a parent, the project version might be inherited (no version tag)
     # or explicitly defined.
     # To be robust without full XML parsing (which destroys formatting), we search for:
     # <version>X.Y.Z</version> that is NOT indented more than the project tag (roughly).
     # Actually, a better heuristic used by tools: <project> ... <version>...</version>
     # We'll search for <version>...</version> and check if it looks like the main version.
-    
+
     # Strategy:
     # 1. Look for <version> after <artifactId> but before <dependencies>, <build>, <profiles> etc.
     # 2. Or just find matches and return the first one that is a SemVer.
     # Let's try to match <version>X.Y.Z</version> taking indentation into account? No, XML is free-form.
-    
+
     # Refined Strategy:
     # Look for <version> match. Ignore if it follows <parent>.
-    # Keep it simple for now: We assume standard Maven layout where project version is 
+    # Keep it simple for now: We assume standard Maven layout where project version is
     # early in the file, possibly after <parent> (if inheriting) or standalone.
     # Wait, if <parent> exists, the project might NOT have a version.
     # We will look for <version> with regex.
-    
+
     matches = list(re.finditer(r'<version>(.*?)</version>', content))
     if not matches:
         raise ValueError("Could not find <version> tag in pom.xml")
-    
+
     # Filter out potential parent/dependency versions?
     # Usually the project version is defined near top.
     # If <parent> exists, the first version tag might be parent's version.
@@ -173,7 +176,7 @@ def get_current_version_maven(content: str) -> str:
          # This regex approach is fragile for complex XML.
          # Let's try to find <project> ... <version>
          pass
-         
+
     # Fallback to first match for MVP, user can provide specific file path if needed.
     # Actually, let's look at the indentation?
     # Or just assume the standard convention.
@@ -185,14 +188,14 @@ def get_current_version_gradle(content: str, filename: str) -> str:
         match = re.search(r'^version\s*=\s*(.*?)\s*$', content, re.MULTILINE)
         if match:
             return match.group(1)
-            
+
     # build.gradle / build.gradle.kts: version = '1.2.3' or version '1.2.3'
     else:
         # version = "..." or version = '...'
         match = re.search(r'''version\s*=?\s*["'](.*?)["']''', content)
         if match:
              return match.group(1)
-             
+
     raise ValueError(f"Could not find version in {filename}")
 
 def replace_version_in_file_maven(path: Path, old: str, new: str) -> bool:
@@ -201,7 +204,7 @@ def replace_version_in_file_maven(path: Path, old: str, new: str) -> bool:
     except Exception as e:
         print(f"Warning: Could not read {path}: {e}", file=sys.stderr)
         return False
-        
+
     # Replace <version>old</version> -> <version>new</version>
     # We replace the *first* matching occurrence of the OLD version in a version tag.
     # This assumes we want to update the one we found earlier.
@@ -219,7 +222,7 @@ def replace_version_in_file_gradle(path: Path, old: str, new: str, filename: str
     except Exception as e:
         print(f"Warning: Could not read {path}: {e}", file=sys.stderr)
         return False
-        
+
     if filename.endswith(".properties"):
          # version=old
          pat = r'^(version\s*=\s*)' + re.escape(old) + r'(\s*)$'
@@ -228,7 +231,7 @@ def replace_version_in_file_gradle(path: Path, old: str, new: str, filename: str
          # available patterns: version = 'old', version 'old', version = "old", version "old"
          pat = r'''(version\s*=?\s*["'])''' + re.escape(old) + r'''(["'])'''
          new_content = re.sub(pat, lambda m: m.group(1) + new + m.group(2), text, count=1)
-         
+
     if text != new_content:
         path.write_text(new_content, encoding="utf-8")
         return True
@@ -247,7 +250,7 @@ def replace_version_in_file_node(path: Path, old: str, new: str) -> bool:
     except Exception as e:
         print(f"Warning: Could not read {path}: {e}", file=sys.stderr)
         return False
-        
+
     pat = r'("version"\s*:\s*")' + re.escape(old) + r'(")'
     if re.search(pat, text):
         new_content = re.sub(pat, lambda m: m.group(1) + new + m.group(2), text, count=1)
@@ -269,7 +272,7 @@ def replace_version_in_file_python(path: Path, old: str, new: str) -> bool:
     except Exception as e:
         print(f"Warning: Could not read {path}: {e}", file=sys.stderr)
         return False
-        
+
     pat = r'^(version\s*=\s*")' + re.escape(old) + r'(")'
     if re.search(pat, text, re.MULTILINE):
         new_content = re.sub(pat, lambda m: m.group(1) + new + m.group(2), text, count=1, flags=re.MULTILINE)
@@ -291,7 +294,7 @@ def replace_version_in_file_dotnet(path: Path, old: str, new: str) -> bool:
     except Exception as e:
         print(f"Warning: Could not read {path}: {e}", file=sys.stderr)
         return False
-        
+
     pat = r'(<Version>)' + re.escape(old) + r'(</Version>)'
     if re.search(pat, text):
         new_content = re.sub(pat, lambda m: m.group(1) + new + m.group(2), text, count=1)
@@ -332,7 +335,7 @@ def main():
     mode = os.environ.get("INPUT_MODE", "go")
     bump_type = os.environ.get("INPUT_BUMP", "patch")
     file_path_str = os.environ.get("INPUT_FILE", "")
-    
+
     if not file_path_str:
         if mode == "go":
             file_path_str = "internal/cmd/version.go"
@@ -345,10 +348,7 @@ def main():
                 file_path_str = "gradle.properties"
             else:
                 # Default to build.gradle, user can override to build.gradle.kts
-                if os.path.exists("build.gradle.kts"):
-                     file_path_str = "build.gradle.kts"
-                else:
-                     file_path_str = "build.gradle"
+                file_path_str = "build.gradle.kts" if os.path.exists("build.gradle.kts") else "build.gradle"
         elif mode == "node":
             file_path_str = "package.json"
         elif mode == "python":
@@ -361,20 +361,23 @@ def main():
             if len(csprojs) == 1:
                 file_path_str = str(csprojs[0])
             else:
-                print("Error: For dotnet mode, input 'file' is required unless there is exactly one .csproj in root.", file=sys.stderr)
+                print(
+                    "Error: For dotnet mode, input 'file' is required unless there is exactly one .csproj in root.",
+                    file=sys.stderr,
+                )
                 sys.exit(1)
         elif mode == "text":
             file_path_str = "VERSION"
-            
+
     file_path = Path(file_path_str)
     if not file_path.is_file():
         # Only error if we expect it to exist. For gradle auto-detect we might fail.
         print(f"Error: Version file '{file_path}' not found.", file=sys.stderr)
         sys.exit(1)
-        
+
     print(f"Reading current version from {file_path}...")
     content = file_path.read_text(encoding="utf-8")
-    
+
     try:
         if mode == "go":
             current_version = get_current_version_go(content)
@@ -398,14 +401,14 @@ def main():
     except ValueError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
-        
+
     print(f"Current version: {current_version}")
-    
+
     new_version = bump_semver(current_version, bump_type)
     print(f"Target version: {new_version} ({bump_type})")
-    
+
     updated_files = []
-    
+
     if mode == "go":
         if replace_version_in_file(file_path, current_version, new_version, mode):
             updated_files.append(file_path)
@@ -435,21 +438,21 @@ def main():
              updated_files.append(file_path)
 
         # Then walk others
-        print(f"Scanning workspace for Cargo.toml files to update...")
+        print("Scanning workspace for Cargo.toml files to update...")
         for p in _cargo_toml_paths(project_root):
              if p.resolve() == file_path.resolve():
                  continue # Already processed
-             
+
              if replace_version_in_file(p, current_version, new_version, mode):
                  updated_files.append(p)
-                 
+
     if not updated_files:
         print("Warning: No files were updated.", file=sys.stderr)
     else:
         print(f"Updated {len(updated_files)} files:")
         for p in updated_files:
             print(f"  {p}")
-            
+
     if "GITHUB_OUTPUT" in os.environ:
         with open(os.environ["GITHUB_OUTPUT"], "a") as f:
             f.write(f"old_version={current_version}\n")
