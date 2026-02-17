@@ -15,10 +15,8 @@ inputs:
 outputs:
   version:
     description: 'The new version'
-    value: ${{ steps.bump.outputs.version }}
   old_version:
     description: 'The previous version'
-    value: ${{ steps.bump.outputs.old_version }}
 runs:
   using: 'docker'
   image: 'Dockerfile'
