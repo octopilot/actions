@@ -58,6 +58,7 @@ ignore = [
 "*/gke_updater.py" = ["T201"]
 "*/eks_updater.py" = ["T201"]
 "*/aks_updater.py" = ["T201"]
+"*/read_properties.py" = ["T201"]
 # common opens https:// API URLs intentionally
 "common/**/notes.py" = ["S310"]
 # Tests: nested with for patch stacking is readable

@@ -1,5 +1,7 @@
 import os
 import sys
+from contextlib import nullcontext
+
 
 def read_properties():
     file_path = os.environ.get("INPUT_FILE", "")
@@ -13,36 +15,37 @@ def read_properties():
         sys.exit(1)
 
     print(f"Reading properties from {file_path}...")
-    
+
     github_env = os.environ.get("GITHUB_ENV", "")
     if not github_env:
-        print("Warning: GITHUB_ENV not set. Variables will not be exported to workflow environment.", file=sys.stderr)
+        print(
+            "Warning: GITHUB_ENV not set. Variables will not be exported to workflow environment.",
+            file=sys.stderr,
+        )
 
     try:
-        with open(file_path, 'r') as f:
+        with open(file_path) as f:
             lines = f.readlines()
 
         # If github_env is empty, use stdout/dummy, but logic below handles 'if github_env'
-        output_file = open(github_env, 'a') if github_env else sys.stdout
-        
-        try:
+        with open(github_env, "a") if github_env else nullcontext(sys.stdout) as output_file:
             for line in lines:
                 line = line.strip()
                 # Ignore comments and empty lines
-                if not line or line.startswith('#') or line.startswith('!'):
+                if not line or line.startswith("#") or line.startswith("!"):
                     continue
-                
+
                 # Split on first '=' or ':'
-                if '=' in line:
-                    key, value = line.split('=', 1)
-                elif ':' in line:
-                    key, value = line.split(':', 1)
+                if "=" in line:
+                    key, value = line.split("=", 1)
+                elif ":" in line:
+                    key, value = line.split(":", 1)
                 else:
                     continue
 
                 key = key.strip()
                 value = value.strip()
-                
+
                 if github_env:
                     # Handle multiline if needed, but properties are usually single line
                     # For simplicity, we assume single line values for now, or use EOF delimiter for safety
@@ -53,14 +56,13 @@ def read_properties():
                 else:
                     print(f"{key}={value}")
 
-            print("Properties exported successfully.")
-        finally:
-            if github_env and output_file is not sys.stdout:
-                output_file.close()
+            if not github_env:
+                print("Properties exported successfully.")
 
     except Exception as e:
         print(f"Error reading properties file: {e}", file=sys.stderr)
         sys.exit(1)
+
 
 if __name__ == "__main__":
     read_properties()

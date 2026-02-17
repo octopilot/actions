@@ -75,7 +75,7 @@ def decrypt_file():
         if export_envs and "GITHUB_ENV" in os.environ:
             print("Exporting secrets to GITHUB_ENV...")
             env_file = os.environ["GITHUB_ENV"]
-            
+
             if output_type == "dotenv":
                 # Dotenv is already KEY=VALUE
                 with open(env_file, "a") as f:
@@ -84,23 +84,25 @@ def decrypt_file():
                             # Simple parsing for dotenv
                             key, value = line.split("=", 1)
                             f.write(f"{key.strip()}={value.strip()}\n")
-            
+
             elif output_type == "json":
                 import json
+
                 try:
                     data = json.loads(decrypted_data)
                     with open(env_file, "a") as f:
                         for key, value in data.items():
-                             # Handle complex types by converting to string or skipping
+                            # Handle complex types by converting to string or skipping
                             if isinstance(value, (dict, list)):
                                 print(f"Warning: Skipping complex type for key {key}", file=sys.stderr)
                                 continue
                             f.write(f"{key}={value}\n")
                 except json.JSONDecodeError as e:
                     print(f"Error parsing JSON for export: {e}", file=sys.stderr)
-            
+
             elif output_type == "yaml":
                 import yaml
+
                 try:
                     data = yaml.safe_load(decrypted_data)
                     with open(env_file, "a") as f:
