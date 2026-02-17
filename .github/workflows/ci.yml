@@ -64,12 +64,15 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
-          images: ghcr.io/octopilot/actions/${{ matrix.action }}
+          images: |
+            ghcr.io/octopilot/actions/${{ matrix.action }}
+            ttl.sh/octopilot/actions/${{ matrix.action }}
           tags: |
             type=ref,event=branch
             type=ref,event=tag
             type=sha
             type=raw,value=latest,enable={{is_default_branch}}
+            type=raw,value=${{ github.sha }}-1h
 
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
@@ -85,7 +88,15 @@ jobs:
         with:
           context: .
           file: ${{ matrix.action }}/Dockerfile
-          push: ${{ github.event_name != 'pull_request' }}
+          # Always push to ttl.sh (which is anonymous & ephemeral), but strict push logic for GHCR handled by meta/login?
+          # Actually build-push-action 'push: true' tries to push to ALL tags.
+          # We need to only push to GHCR if we are allowed.
+          # But we want to ALWAYS push to ttl.sh for tests.
+          # The simplest way is to just set push: true.
+          # However, pushing to ghcr requires login.
+          # If PR, we skip login. So pushing to ghcr will fail if we include it in tags.
+          # We can conditionally set tags.
+          push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.action }}
@@ -131,6 +142,12 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      - name: Use Ephemeral Image
+        run: |
+          # Replace the GHCR image with the ttl.sh image for this test run
+          sed -i "s|image: 'docker://ghcr.io/octopilot/actions/read-properties:latest'|image: 'docker://ttl.sh/octopilot/actions/read-properties:${{ github.sha }}-1h'|g" read-properties/action.yml
+          cat read-properties/action.yml | grep "image:"
+
       - name: Create dummy properties file
         run: |
           echo "FOO=bar" > test.properties
@@ -142,8 +159,6 @@ jobs:
         uses: ./read-properties
         with:
           file: test.properties
-        # Continue on error if the image isn't available immediately after build (ghcr propagation)
-        continue-on-error: true
 
       - name: Verify Environment Variables
         if: steps.read_props.outcome == 'success'
@@ -158,6 +173,11 @@ jobs:
     needs: build-actions
     steps:
       - uses: actions/checkout@v4
+
+      - name: Use Ephemeral Image
+        run: |
+          sed -i "s|image: 'docker://ghcr.io/octopilot/actions/sops-decrypt:latest'|image: 'docker://ttl.sh/octopilot/actions/sops-decrypt:${{ github.sha }}-1h'|g" sops-decrypt/action.yml
+          cat sops-decrypt/action.yml | grep "image:"
 
       - name: Set up Python
         uses: actions/setup-python@v5
