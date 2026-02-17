@@ -67,12 +67,15 @@ build:
     @patch("detect.os.environ", {})
     def test_main_flow(self, mock_file, mock_yaml_load, mock_listdir, mock_exists, capsys):
         # Setup mocks
-        mock_exists.side_effect = lambda p: p in [
-            "skaffold.yaml",
-            "./go-service",
-            "./rust-service",
-            "./unknown-service",
-        ]
+        mock_exists.side_effect = lambda p: (
+            p
+            in [
+                "skaffold.yaml",
+                "./go-service",
+                "./rust-service",
+                "./unknown-service",
+            ]
+        )
 
         def listdir_side_effect(path):
             if path == "./go-service":
