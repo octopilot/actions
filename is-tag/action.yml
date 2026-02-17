@@ -1,0 +1,36 @@
+name: 'Is Tag'
+description: 'Check if the current commit is a tag (via GITHUB_REF or git describe).'
+inputs: {}
+outputs:
+  is_tag:
+    description: 'True if the current commit is a tag, False otherwise.'
+    value: ${{ steps.check.outputs.is_tag }}
+  tag:
+    description: 'The tag name if is_tag is True, empty otherwise.'
+    value: ${{ steps.check.outputs.tag }}
+runs:
+  using: "composite"
+  steps:
+    - name: Check for Tag
+      id: check
+      shell: bash
+      run: |
+        is_tag="false"
+        tag=""
+        
+        # Check GITHUB_REF (CI)
+        if [[ "$GITHUB_REF" == "refs/tags/"* ]]; then
+          echo "GITHUB_REF is a tag."
+          is_tag="true"
+          tag="${GITHUB_REF#refs/tags/}"
+        else
+          # Fallback to git describe (Local/CI without ref)
+          if git describe --exact-match --tags HEAD >/dev/null 2>&1; then
+            echo "git describe found a tag."
+            is_tag="true"
+            tag=$(git describe --exact-match --tags HEAD)
+          fi
+        fi
+
+        echo "is_tag=$is_tag" >> $GITHUB_OUTPUT
+        echo "tag=$tag" >> $GITHUB_OUTPUT

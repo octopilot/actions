@@ -15,6 +15,8 @@ Official GitHub Actions for the Octopilot ecosystem. This monorepo contains a su
 | [**eks-allow-runner**](network-access/eks-allow-runner/README.md) | Whitelists GitHub Runner IPs in AWS EKS public access CIDRs. |
 | [**aks-allow-runner**](network-access/aks-allow-runner/README.md) | Whitelists GitHub Runner IPs in Azure AKS API Server authorized IP ranges. |
 | [**octopilot**](octopilot/README.md) | Run Octopilot CLI (`op`) commands as a GitHub Action. |
+| [**is-tag**](is-tag/README.md) | Checks if the current commit is a tag. |
+| [**previous-tag**](previous-tag/README.md) | Finds the previous tag relative to the current commit. |
 
 ## Usage
 
