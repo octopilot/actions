@@ -30,9 +30,5 @@ def main():
         # Fallback for local testing
         print(f"::set-output name=actions::{json.dumps(actions)}")
 
-<<<<<<< HEAD
-=======
-
->>>>>>> 844bcc9 (fix(hack): resolve linting errors in discovery script)
 if __name__ == "__main__":
     main()
