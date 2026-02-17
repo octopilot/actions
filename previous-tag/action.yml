@@ -10,29 +10,7 @@ outputs:
     description: 'The previous tag found.'
     value: ${{ steps.find.outputs.tag }}
 runs:
-  using: "composite"
-  steps:
-    - name: Find Previous Tag
-      id: find
-      shell: bash
-      run: |
-        # Fetch tags (shallow clones might need this)
-        git fetch --tags --force
-        
-        target="HEAD"
-        # If current commit is a tag, we want the *previous* one, so start searching from parent
-        if git describe --exact-match --tags HEAD >/dev/null 2>&1; then
-          echo "Current commit is a tag. Searching from HEAD^..."
-          target="HEAD^"
-        fi
-        
-        tag=""
-        if git describe --tags --abbrev=0 "$target" >/dev/null 2>&1; then
-          tag=$(git describe --tags --abbrev=0 "$target")
-          echo "Found previous tag: $tag"
-        else
-          echo "No previous tag found."
-          tag="${{ inputs.fallback }}"
-        fi
-        
-        echo "tag=$tag" >> $GITHUB_OUTPUT
+  using: 'docker'
+  image: 'docker://ghcr.io/octopilot/actions/previous-tag:latest'
+  env:
+    INPUT_FALLBACK: ${{ inputs.fallback }}
