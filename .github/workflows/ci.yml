@@ -44,13 +44,29 @@ jobs:
       - uses: actions/checkout@v4
       - id: set-matrix
         run: |
-          # Find all directories containing a Dockerfile, exclude root if any
-          # Output relative path, remove leading ./ and trailing /Dockerfile
-          # We use python for robust json generation to avoid jq dependency if possible, or just jq
-          # GitHub runners have jq.
-          ACTIONS=$(find . -maxdepth 2 -name Dockerfile | cut -d '/' -f 2 | jq -R -s -c 'split("\n")[:-1]')
-          echo "Found actions: $ACTIONS"
-          echo "actions=$ACTIONS" >> $GITHUB_OUTPUT
+          # Find all directories containing action.yml (identifying them as Actions)
+          # Then check if they have a Dockerfile (identifying them as containerizable)
+          # Output relative path, remove non-matching lines
+
+          # We gather all dirs with action.yml
+          ACTIONS_DIRS=$(find . -maxdepth 2 -name action.yml -exec dirname {} \;)
+
+          # Filter list to only valid docker builds
+          VALID_ACTIONS=""
+          for dir in $ACTIONS_DIRS; do
+             # remove ./ prefix
+             clean_dir=${dir#./}
+             if [ -f "$clean_dir/Dockerfile" ]; then
+                VALID_ACTIONS="$VALID_ACTIONS$clean_dir\n"
+             fi
+          done
+
+          # JSON encode the list
+          # Remove trailing newline from validation loop
+          JSON=$(echo -e "$VALID_ACTIONS" | jq -R -s -c 'split("\n")[:-1]')
+
+          echo "Found containerizable actions: $JSON"
+          echo "actions=$JSON" >> $GITHUB_OUTPUT
 
   build-actions:
     name: Build action image (${{ matrix.action }})
