@@ -22,24 +22,12 @@ inputs:
     required: false
     default: 'false'
 runs:
-  using: "composite"
-  steps:
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-
-    - name: Install dependencies
-      shell: bash
-      run: pip install requests ${{ github.action_path }}/../common
-
-    - name: Authenticate Kubernetes
-      shell: bash
-      env:
-        INPUT_OIDC_URL: ${{ inputs.oidc_url }}
-        INPUT_OIDC_USERNAME: ${{ inputs.oidc_username }}
-        INPUT_OIDC_PASSWORD: ${{ inputs.oidc_password }}
-        INPUT_K8S_URL: ${{ inputs.k8s_url }}
-        INPUT_K8S_NAMESPACE: ${{ inputs.k8s_namespace }}
-        INPUT_K8S_SKIP_TLS_VERIFY: ${{ inputs.k8s_skip_tls_verify }}
-      run: python ${{ github.action_path }}/auth_kubernetes.py
+  using: 'docker'
+  image: 'docker://ghcr.io/octopilot/actions/kubernetes-auth:latest'
+  env:
+    INPUT_OIDC_URL: ${{ inputs.oidc_url }}
+    INPUT_OIDC_USERNAME: ${{ inputs.oidc_username }}
+    INPUT_OIDC_PASSWORD: ${{ inputs.oidc_password }}
+    INPUT_K8S_URL: ${{ inputs.k8s_url }}
+    INPUT_K8S_NAMESPACE: ${{ inputs.k8s_namespace }}
+    INPUT_K8S_SKIP_TLS_VERIFY: ${{ inputs.k8s_skip_tls_verify }}

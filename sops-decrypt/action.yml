@@ -27,36 +27,12 @@ outputs:
     description: 'Decrypted data'
     value: ${{ steps.decrypt.outputs.data }}
 runs:
-  using: "composite"
-  steps:
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-        
-    - name: Install dependencies
-      shell: bash
-      run: |
-        python -m pip install --upgrade pip
-        pip install PyYAML
-        pip install ${{ github.action_path }}/../common
-        # Install sops binary if not present (simplified for now, assumes it might be on runner or we install it)
-        # For this implementation plan, we focus on the python logic. 
-        # In a real scenario we'd download the binary here.
-        if ! command -v sops &> /dev/null; then
-            echo "SOPS binary not found. Installing..."
-            # logic to install sops would go here, or we assume it's pre-installed
-            # For now let's assume the user installs it or use a separate setup-tools action
-        fi
-
-    - name: Decrypt
-      id: decrypt
-      shell: bash
-      env:
-        INPUT_FILE: ${{ inputs.file }}
-        INPUT_GPG_KEY: ${{ inputs.gpg_key }}
-        INPUT_AGE_KEY: ${{ inputs.age_key }}
-        INPUT_OUTPUT_TYPE: ${{ inputs.output_type }}
-        INPUT_EXPORT_ENVS: ${{ inputs.export_envs }}
-        INPUT_VERSION: ${{ inputs.version }}
-      run: python ${{ github.action_path }}/sops_decrypt.py
+  using: 'docker'
+  image: 'docker://ghcr.io/octopilot/actions/sops-decrypt:latest'
+  env:
+    INPUT_FILE: ${{ inputs.file }}
+    INPUT_GPG_KEY: ${{ inputs.gpg_key }}
+    INPUT_AGE_KEY: ${{ inputs.age_key }}
+    INPUT_OUTPUT_TYPE: ${{ inputs.output_type }}
+    INPUT_EXPORT_ENVS: ${{ inputs.export_envs }}
+    INPUT_VERSION: ${{ inputs.version }}

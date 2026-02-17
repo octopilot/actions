@@ -19,7 +19,7 @@ outputs:
     description: 'The previous version'
 runs:
   using: 'docker'
-  image: 'Dockerfile'
+  image: 'docker://ghcr.io/octopilot/actions/bump-version:latest'
   env:
     INPUT_MODE: ${{ inputs.mode }}
     INPUT_BUMP: ${{ inputs.bump }}

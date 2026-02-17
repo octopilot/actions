@@ -5,19 +5,7 @@ inputs:
     description: 'Path to the properties file'
     required: true
 runs:
-  using: "composite"
-  steps:
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-
-    - name: Install dependencies
-      shell: bash
-      run: pip install ${{ github.action_path }}/../common
-
-    - name: Read Properties
-      shell: bash
-      env:
-        INPUT_FILE: ${{ inputs.file }}
-      run: python ${{ github.action_path }}/read_properties.py
+  using: 'docker'
+  image: 'docker://ghcr.io/octopilot/actions/read-properties:latest'
+  env:
+    INPUT_FILE: ${{ inputs.file }}

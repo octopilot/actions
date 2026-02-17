@@ -16,22 +16,10 @@ inputs:
     required: true
     default: ${{ github.token }}
 runs:
-  using: "composite"
-  steps:
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.11'
-
-    - name: Install dependencies
-      shell: bash
-      run: pip install requests pynacl ${{ github.action_path }}/../common
-
-    - name: Rotate Secret
-      shell: bash
-      env:
-        INPUT_SECRET_NAME: ${{ inputs.secret_name }}
-        INPUT_SECRET_VALUE: ${{ inputs.secret_value }}
-        INPUT_REPOSITORY: ${{ inputs.repository }}
-        INPUT_TOKEN: ${{ inputs.token }}
-      run: python ${{ github.action_path }}/rotate_secret.py
+  using: 'docker'
+  image: 'docker://ghcr.io/octopilot/actions/rotate-secret:latest'
+  env:
+    INPUT_SECRET_NAME: ${{ inputs.secret_name }}
+    INPUT_SECRET_VALUE: ${{ inputs.secret_value }}
+    INPUT_REPOSITORY: ${{ inputs.repository }}
+    INPUT_TOKEN: ${{ inputs.token }}
