@@ -99,6 +99,7 @@ def detect_java_version(context):
 def detect_project_info(context_path):
     """Detects language and version based on files in the context directory."""
     if not os.path.exists(context_path):
+        sys.stderr.write(f"DEBUG: Directory not found: {context_path}\n")
         return None
 
     try:
