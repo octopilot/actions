@@ -103,7 +103,9 @@ def detect_project_info(context_path):
 
     try:
         files = os.listdir(context_path)
-    except OSError:
+        sys.stderr.write(f"DEBUG: Files in {context_path}: {files}\n")
+    except OSError as e:
+        sys.stderr.write(f"DEBUG: Error listing {context_path}: {e}\n")
         return None
 
     info = {"language": None, "version": ""}
