@@ -4,8 +4,10 @@ name: CI
 on:
   push:
     branches: [main, master]
+    tags: ["v*"]
   pull_request:
     branches: [main, master]
+  workflow_dispatch:
 
 jobs:
   test:
@@ -38,13 +40,26 @@ jobs:
     runs-on: ubuntu-latest
     needs: test
     permissions:
-      contents: read
+      contents: write
       packages: write
+      id-token: write
+      attestations: write
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
+
+      - name: Docker Metadata
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: ghcr.io/octopilot/actions/release
+          tags: |
+            type=ref,event=branch
+            type=ref,event=tag
+            type=sha
+            type=raw,value=latest,enable={{is_default_branch}}
 
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
@@ -55,13 +70,46 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and Push release action image
+        id: push
         uses: docker/build-push-action@v6
         with:
           context: .
           file: release/Dockerfile
           push: ${{ github.event_name != 'pull_request' }}
-          tags: |
-            ghcr.io/octopilot/actions/release:latest
-            ghcr.io/octopilot/actions/release:${{ github.sha }}
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
+
+      - name: Attest Build Provenance
+        if: github.event_name != 'pull_request'
+        uses: actions/attest-build-provenance@v2
+        with:
+          subject-name: ghcr.io/octopilot/actions/release
+          subject-digest: ${{ steps.push.outputs.digest }}
+          push-to-registry: true
+
+      - name: Find Previous Tag
+        if: startswith(github.ref, 'refs/tags/v')
+        id: prev_tag
+        uses: octopilot/actions/previous-tag@main
+        with:
+          fallback: "v0.0.0"
+
+      - name: Generate Release Notes
+        if: startswith(github.ref, 'refs/tags/v')
+        id: release_notes
+        uses: octopilot/actions/release@main
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+        with:
+          version: ${{ github.ref_name }}
+          since_tag: ${{ steps.prev_tag.outputs.tag }}
+          provider: anthropic
+
+      - name: Create Release
+        if: startswith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          body_path: ${{ steps.release_notes.outputs.body_file }}
+          generate_release_notes: false
