@@ -58,9 +58,24 @@ def get_commits_since(project_root: Path, ref: str) -> list[str]:
     """Return list of commit subject lines from ref..HEAD (excluding ref, including HEAD).
     Raises ReleaseNotesError if ref is invalid.
     """
+    cmd = ["git", "log", f"{ref}..HEAD", "--pretty=format:%s"]
+
+    # Special case: If ref is v0.0.0 (default fallback) and it doesn't exist, log from start.
+    if ref == "v0.0.0":
+        try:
+            subprocess.run(
+                ["git", "rev-parse", "--verify", ref],
+                cwd=project_root,
+                check=True,
+                capture_output=True,
+            )
+        except subprocess.CalledProcessError:
+            # v0.0.0 does not exist, assume start of history
+            cmd = ["git", "log", "HEAD", "--pretty=format:%s"]
+
     try:
         out = subprocess.run(
-            ["git", "log", f"{ref}..HEAD", "--pretty=format:%s"],
+            cmd,
             cwd=project_root,
             capture_output=True,
             text=True,
