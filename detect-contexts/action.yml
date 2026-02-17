@@ -1,0 +1,32 @@
+name: 'Detect CI Contexts'
+description: 'Parses skaffold.yaml to detect build contexts and languages for CI matrix generation.'
+inputs:
+  skaffold-file:
+    description: 'Path to skaffold.yaml'
+    required: false
+    default: 'skaffold.yaml'
+outputs:
+  matrix:
+    description: 'JSON string for GitHub Actions matrix strategy (include)'
+    value: ${{ steps.detect.outputs.matrix }}
+  languages:
+    description: 'Comma-separated list of detected languages'
+    value: ${{ steps.detect.outputs.languages }}
+runs:
+  using: "composite"
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@v5
+      with:
+        python-version: '3.11'
+
+    - name: Install dependencies
+      shell: bash
+      run: pip install pyyaml
+
+    - name: Run detection script
+      id: detect
+      shell: bash
+      env:
+        SKAFFOLD_FILE: ${{ inputs.skaffold-file }}
+      run: python ${{ github.action_path }}/detect.py
