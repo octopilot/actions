@@ -12,6 +12,21 @@ outputs:
   languages:
     description: 'Comma-separated list of detected languages'
     value: ${{ steps.detect.outputs.languages }}
+  go-version:
+    description: "Detected Go version (if any)"
+    value: ${{ steps.detect.outputs.go-version }}
+  rust-version:
+    description: "Detected Rust version (if any)"
+    value: ${{ steps.detect.outputs.rust-version }}
+  node-version:
+    description: "Detected Node version (if any)"
+    value: ${{ steps.detect.outputs.node-version }}
+  python-version:
+    description: "Detected Python version (if any)"
+    value: ${{ steps.detect.outputs.python-version }}
+  java-version:
+    description: "Detected Java version (if any)"
+    value: ${{ steps.detect.outputs.java-version }}
 runs:
   using: "composite"
   steps:
