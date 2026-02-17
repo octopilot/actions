@@ -60,8 +60,8 @@ ignore = [
 "*/aks_updater.py" = ["T201"]
 "*/read_properties.py" = ["T201"]
 "bump-version/bump_version.py" = ["T201"]
-# common opens https:// API URLs intentionally
 "common/**/notes.py" = ["S310"]
+"hack/**" = ["T201"]
 # Tests: nested with for patch stacking is readable
 # Tests: nested with for patch stacking is readable, allow asserts and other security laxity in tests
 "**/tests/**" = ["SIM117", "S101", "S105", "S106", "S108"]
