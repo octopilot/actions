@@ -49,7 +49,7 @@ jobs:
           # Output relative path, remove non-matching lines
 
           # We gather all dirs with action.yml
-          ACTIONS_DIRS=$(find . -maxdepth 2 -name action.yml -exec dirname {} \;)
+          ACTIONS_DIRS=$(find . -name action.yml -exec dirname {} \;)
 
           # Filter list to only valid docker builds
           VALID_ACTIONS=""
