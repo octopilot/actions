@@ -1,3 +1,4 @@
+import re
 import sys
 import os
 import pytest
@@ -160,3 +161,87 @@ def test_cargo_toml_paths_filtering(tmp_path):
     assert "target/Cargo.toml" not in rel_paths
     assert ".git/Cargo.toml" not in rel_paths
     assert "node_modules/Cargo.toml" not in rel_paths
+
+# --- Maven Logic Tests ---
+
+def test_get_current_version_maven():
+    # Standard pom
+    content = """<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.example</groupId>
+  <artifactId>my-app</artifactId>
+  <version>1.0.0</version>
+</project>
+"""
+    assert bump_version.get_current_version_maven(content) == "1.0.0"
+
+def test_get_current_version_maven_indented():
+    content = """<project>
+    <version>0.9.9</version>
+</project>"""
+    assert bump_version.get_current_version_maven(content) == "0.9.9"
+
+def test_replace_version_in_file_maven(tmp_path):
+    f = tmp_path / "pom.xml"
+    content = """<project>
+  <modelVersion>4.0.0</modelVersion>
+  <groupId>com.example</groupId>
+  <artifactId>my-app</artifactId>
+  <version>1.0.0</version>
+  <dependencies>
+      <dependency>
+          <groupId>other</groupId>
+          <artifactId>lib</artifactId>
+          <version>1.0.0</version>
+      </dependency>
+  </dependencies>
+</project>
+"""
+    f.write_text(content, encoding="utf-8")
+    
+    assert bump_version.replace_version_in_file_maven(f, "1.0.0", "1.0.1") is True
+    
+    new_content = f.read_text(encoding="utf-8")
+    # Should replace the FIRST occurrence (project version)
+    assert '<version>1.0.1</version>' in new_content
+    # Dependency version usually appears later, but if it matches old version it MIGHT get replaced if we aren't careful.
+    # Our regex logic replaces the FIRST occurrence.
+    # In standard POM, project version comes before dependencies.
+    # So the dependency version "1.0.0" should remain "1.0.0" if it was distinct, but here it is same.
+    # `re.sub(..., count=1)` ensures only the first one found is replaced.
+    # Check that dependency is UNCHANGED if it appears after.
+    # Python re.sub replaces from left to right.
+    
+    # We expect 'version>1.0.1<' at the top, and 'version>1.0.0<' inside dependency
+    matches = list(re.finditer(r'<version>(.*?)</version>', new_content))
+    assert len(matches) >= 2
+    assert matches[0].group(1) == "1.0.1" # First one updated
+    assert matches[1].group(1) == "1.0.0" # Second one (dependency) untouched
+
+# --- Gradle Logic Tests ---
+
+def test_get_current_version_gradle_properties():
+    content = "version=1.2.3\n"
+    assert bump_version.get_current_version_gradle(content, "gradle.properties") == "1.2.3"
+
+def test_get_current_version_gradle_build_groovy():
+    content = "plugins { id 'java' }\nversion = '0.1.0'\n"
+    assert bump_version.get_current_version_gradle(content, "build.gradle") == "0.1.0"
+
+def test_get_current_version_gradle_build_kotlin():
+    content = 'version = "0.1.0-rc.1"'
+    assert bump_version.get_current_version_gradle(content, "build.gradle.kts") == "0.1.0-rc.1"
+    
+def test_replace_version_in_file_gradle_properties(tmp_path):
+    f = tmp_path / "gradle.properties"
+    f.write_text("version=1.2.3\nfoo=bar", encoding="utf-8")
+    
+    assert bump_version.replace_version_in_file_gradle(f, "1.2.3", "1.2.4", f.name) is True
+    assert f.read_text(encoding="utf-8") == "version=1.2.4\nfoo=bar"
+
+def test_replace_version_in_file_gradle_build(tmp_path):
+    f = tmp_path / "build.gradle"
+    f.write_text("group 'com.example'\nversion = '1.0.0'\n", encoding="utf-8")
+    
+    assert bump_version.replace_version_in_file_gradle(f, "1.0.0", "1.1.0", f.name) is True
+    assert "version = '1.1.0'" in f.read_text(encoding="utf-8")

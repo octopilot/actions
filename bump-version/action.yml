@@ -2,7 +2,7 @@ name: 'Bump Version'
 description: 'Bump semantic version in Go or Rust projects.'
 inputs:
   mode:
-    description: 'Language mode (go or rust)'
+    description: 'Language mode (go, rust, maven, gradle)'
     required: false
     default: 'go'
   bump:

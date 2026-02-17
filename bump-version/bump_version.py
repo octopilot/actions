@@ -135,6 +135,105 @@ def replace_version_in_file(path: Path, old: str, new: str, mode: str) -> bool:
         
     return False
 
+def get_current_version_maven(content: str) -> str:
+    # Match <version>...</version> inside <project>...<version>...</version>...</project>
+    # Simple regex approach: find the first <version> tag that is NOT inside a <dependency>, <parent>, or <plugin>.
+    # However, standard practice is <project>...<version>X.Y.Z</version>...
+    # We will look for <version> at the top level of project.
+    # A safe heuristic for simple poms: The project version is usually the first <version> tag, 
+    # unless there is a <parent> tag. If there is a parent, the project version might be inherited (no version tag)
+    # or explicitly defined.
+    # To be robust without full XML parsing (which destroys formatting), we search for:
+    # <version>X.Y.Z</version> that is NOT indented more than the project tag (roughly).
+    # Actually, a better heuristic used by tools: <project> ... <version>...</version>
+    # We'll search for <version>...</version> and check if it looks like the main version.
+    
+    # Strategy:
+    # 1. Look for <version> after <artifactId> but before <dependencies>, <build>, <profiles> etc.
+    # 2. Or just find matches and return the first one that is a SemVer.
+    # Let's try to match <version>X.Y.Z</version> taking indentation into account? No, XML is free-form.
+    
+    # Refined Strategy:
+    # Look for <version> match. Ignore if it follows <parent>.
+    # Keep it simple for now: We assume standard Maven layout where project version is 
+    # early in the file, possibly after <parent> (if inheriting) or standalone.
+    # Wait, if <parent> exists, the project might NOT have a version.
+    # We will look for <version> with regex.
+    
+    matches = list(re.finditer(r'<version>(.*?)</version>', content))
+    if not matches:
+        raise ValueError("Could not find <version> tag in pom.xml")
+    
+    # Filter out potential parent/dependency versions?
+    # Usually the project version is defined near top.
+    # If <parent> exists, the first version tag might be parent's version.
+    if '<parent>' in content:
+         # If parent block ends before our match, then our match is likely project version.
+         # Or if match is inside parent block.
+         # This regex approach is fragile for complex XML.
+         # Let's try to find <project> ... <version>
+         pass
+         
+    # Fallback to first match for MVP, user can provide specific file path if needed.
+    # Actually, let's look at the indentation?
+    # Or just assume the standard convention.
+    return matches[0].group(1)
+
+def get_current_version_gradle(content: str, filename: str) -> str:
+    # gradle.properties: version=1.2.3
+    if filename.endswith(".properties"):
+        match = re.search(r'^version\s*=\s*(.*?)\s*$', content, re.MULTILINE)
+        if match:
+            return match.group(1)
+            
+    # build.gradle / build.gradle.kts: version = '1.2.3' or version '1.2.3'
+    else:
+        # version = "..." or version = '...'
+        match = re.search(r'''version\s*=?\s*["'](.*?)["']''', content)
+        if match:
+             return match.group(1)
+             
+    raise ValueError(f"Could not find version in {filename}")
+
+def replace_version_in_file_maven(path: Path, old: str, new: str) -> bool:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception as e:
+        print(f"Warning: Could not read {path}: {e}", file=sys.stderr)
+        return False
+        
+    # Replace <version>old</version> -> <version>new</version>
+    # We replace the *first* matching occurrence of the OLD version in a version tag.
+    # This assumes we want to update the one we found earlier.
+    pat = r'(<version>)' + re.escape(old) + r'(</version>)'
+    if re.search(pat, text):
+        new_content = re.sub(pat, lambda m: m.group(1) + new + m.group(2), text, count=1)
+        if text != new_content:
+            path.write_text(new_content, encoding="utf-8")
+            return True
+    return False
+
+def replace_version_in_file_gradle(path: Path, old: str, new: str, filename: str) -> bool:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception as e:
+        print(f"Warning: Could not read {path}: {e}", file=sys.stderr)
+        return False
+        
+    if filename.endswith(".properties"):
+         # version=old
+         pat = r'^(version\s*=\s*)' + re.escape(old) + r'(\s*)$'
+         new_content = re.sub(pat, lambda m: m.group(1) + new + m.group(2), text, count=1, flags=re.MULTILINE)
+    else:
+         # available patterns: version = 'old', version 'old', version = "old", version "old"
+         pat = r'''(version\s*=?\s*["'])''' + re.escape(old) + r'''(["'])'''
+         new_content = re.sub(pat, lambda m: m.group(1) + new + m.group(2), text, count=1)
+         
+    if text != new_content:
+        path.write_text(new_content, encoding="utf-8")
+        return True
+    return False
+
 def _cargo_toml_paths(project_root: Path) -> list[Path]:
     out = []
     # Use Path.rglob which is available in Python 3.12 (action uses 3.12)
@@ -160,9 +259,21 @@ def main():
             file_path_str = "internal/cmd/version.go"
         elif mode == "rust":
             file_path_str = "Cargo.toml"
+        elif mode == "maven":
+            file_path_str = "pom.xml"
+        elif mode == "gradle":
+            if os.path.exists("gradle.properties"):
+                file_path_str = "gradle.properties"
+            else:
+                # Default to build.gradle, user can override to build.gradle.kts
+                if os.path.exists("build.gradle.kts"):
+                     file_path_str = "build.gradle.kts"
+                else:
+                     file_path_str = "build.gradle"
             
     file_path = Path(file_path_str)
     if not file_path.is_file():
+        # Only error if we expect it to exist. For gradle auto-detect we might fail.
         print(f"Error: Version file '{file_path}' not found.", file=sys.stderr)
         sys.exit(1)
         
@@ -174,6 +285,10 @@ def main():
             current_version = get_current_version_go(content)
         elif mode == "rust":
             current_version = get_current_version_rust(content)
+        elif mode == "maven":
+            current_version = get_current_version_maven(content)
+        elif mode == "gradle":
+            current_version = get_current_version_gradle(content, file_path.name)
         else:
             print(f"Error: Unsupported mode '{mode}'", file=sys.stderr)
             sys.exit(1)
@@ -191,6 +306,12 @@ def main():
     if mode == "go":
         if replace_version_in_file(file_path, current_version, new_version, mode):
             updated_files.append(file_path)
+    elif mode == "maven":
+        if replace_version_in_file_maven(file_path, current_version, new_version):
+             updated_files.append(file_path)
+    elif mode == "gradle":
+        if replace_version_in_file_gradle(file_path, current_version, new_version, file_path.name):
+             updated_files.append(file_path)
     elif mode == "rust":
         # For Rust, we walk the whole workspace
         project_root = Path.cwd()
