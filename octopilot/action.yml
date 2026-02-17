@@ -15,4 +15,4 @@ runs:
   entrypoint: '/bin/sh'
   args:
     - '-c'
-    - 'cd $GITHUB_WORKSPACE && op ${{ inputs.command }} ${{ inputs.args }}'
+    - 'echo "DEBUG: GITHUB_WORKSPACE=$GITHUB_WORKSPACE" && echo "DEBUG: Initial pwd=$(pwd)" && ls -la && cd $GITHUB_WORKSPACE && echo "DEBUG: Pwd after cd=$(pwd)" && ls -la && op ${{ inputs.command }} ${{ inputs.args }}'
