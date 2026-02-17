@@ -25,7 +25,7 @@ jobs:
         run: pip install -e ./common
 
       - name: Install dev dependencies
-        run: pip install pytest pytest-cov ruff
+        run: pip install pytest pytest-cov ruff PyYAML
 
       - name: Ruff (check + format)
         run: ruff check . && ruff format --check .
