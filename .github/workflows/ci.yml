@@ -35,20 +35,31 @@ jobs:
         env:
           PYTHONPATH: common
 
+  discover-actions:
+    name: Discover Actions
+    runs-on: ubuntu-latest
+    outputs:
+      actions: ${{ steps.set-matrix.outputs.actions }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: set-matrix
+        run: |
+          # Find all directories containing a Dockerfile, exclude root if any
+          # Output relative path, remove leading ./ and trailing /Dockerfile
+          # We use python for robust json generation to avoid jq dependency if possible, or just jq
+          # GitHub runners have jq.
+          ACTIONS=$(find . -maxdepth 2 -name Dockerfile | cut -d '/' -f 2 | jq -R -s -c 'split("\n")[:-1]')
+          echo "Found actions: $ACTIONS"
+          echo "actions=$ACTIONS" >> $GITHUB_OUTPUT
+
   build-actions:
     name: Build action image (${{ matrix.action }})
     runs-on: ubuntu-latest
-    needs: test
+    needs: [test, discover-actions]
     strategy:
       fail-fast: false
       matrix:
-        action:
-          - release
-          - bump-version
-          - read-properties
-          - rotate-secret
-          - sops-decrypt
-          - kubernetes-auth
+        action: ${{ fromJson(needs.discover-actions.outputs.actions) }}
     permissions:
       contents: write
       packages: write
