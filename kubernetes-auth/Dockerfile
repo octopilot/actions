@@ -4,6 +4,7 @@ WORKDIR /action
 
 # Install git
 RUN apt-get update && apt-get install -y --no-install-recommends git && rm -rf /var/lib/apt/lists/*
+RUN git config --global --add safe.directory /github/workspace
 
 # Copy common module
 COPY common /action/common
