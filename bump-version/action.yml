@@ -20,22 +20,9 @@ outputs:
     description: 'The previous version'
     value: ${{ steps.bump.outputs.old_version }}
 runs:
-  using: "composite"
-  steps:
-    - name: Set up Python
-      uses: actions/setup-python@v5
-      with:
-        python-version: '3.12'
-
-    - name: Install dependencies
-      shell: bash
-      run: pip install ${{ github.action_path }}/../common
-
-    - name: Bump Version
-      id: bump
-      shell: bash
-      env:
-        INPUT_MODE: ${{ inputs.mode }}
-        INPUT_BUMP: ${{ inputs.bump }}
-        INPUT_FILE: ${{ inputs.file }}
-      run: python ${{ github.action_path }}/bump_version.py
+  using: 'docker'
+  image: 'Dockerfile'
+  env:
+    INPUT_MODE: ${{ inputs.mode }}
+    INPUT_BUMP: ${{ inputs.bump }}
+    INPUT_FILE: ${{ inputs.file }}
