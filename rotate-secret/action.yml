@@ -25,7 +25,7 @@ runs:
 
     - name: Install dependencies
       shell: bash
-      run: pip install requests pynacl
+      run: pip install requests pynacl ${{ github.action_path }}/../common
 
     - name: Rotate Secret
       shell: bash

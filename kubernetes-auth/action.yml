@@ -31,7 +31,7 @@ runs:
 
     - name: Install dependencies
       shell: bash
-      run: pip install requests
+      run: pip install requests ${{ github.action_path }}/../common
 
     - name: Authenticate Kubernetes
       shell: bash

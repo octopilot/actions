@@ -25,7 +25,7 @@ runs:
 
     - name: Install dependencies
       shell: bash
-      run: pip install requests boto3
+      run: pip install requests boto3 ${{ github.action_path }}/../../common
 
     # Assuming AWS credentials are set up via aws-actions/configure-aws-credentials
     # before calling this action, or via env vars.

@@ -28,7 +28,7 @@ runs:
 
     - name: Install dependencies
       shell: bash
-      run: pip install requests azure-mgmt-containerservice azure-identity
+      run: pip install requests azure-mgmt-containerservice azure-identity ${{ github.action_path }}/../../common
 
     # Assuming Azure login is done via azure/login action before this
 

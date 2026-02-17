@@ -31,7 +31,7 @@ runs:
 
     - name: Install dependencies
       shell: bash
-      run: pip install requests google-cloud-container
+      run: pip install requests google-cloud-container ${{ github.action_path }}/../../common
 
     - name: Auth with GCP
       if: inputs.service_account_key != ''
