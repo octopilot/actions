@@ -1,0 +1,17 @@
+name: 'Octopilot'
+description: 'Run Octopilot CLI (op) commands to manage your pipelines.'
+inputs:
+  command:
+    description: 'The command to run (e.g., build, version)'
+    required: false
+    default: 'help'
+  args:
+    description: 'Arguments for the command'
+    required: false
+    default: ''
+runs:
+  using: 'docker'
+  image: 'docker://ghcr.io/octopilot/octopilot-pipeline-tools/octopilot-pipeline-tools:latest'
+  args:
+    - ${{ inputs.command }}
+    - ${{ inputs.args }}
