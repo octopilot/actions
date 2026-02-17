@@ -12,6 +12,7 @@ inputs:
 runs:
   using: 'docker'
   image: 'docker://ghcr.io/octopilot/octopilot-pipeline-tools/octopilot-pipeline-tools:latest'
+  entrypoint: '/bin/sh'
   args:
-    - ${{ inputs.command }}
-    - ${{ inputs.args }}
+    - '-c'
+    - 'op ${{ inputs.command }} ${{ inputs.args }}'
