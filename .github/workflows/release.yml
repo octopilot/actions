@@ -1,0 +1,30 @@
+name: Trigger Release
+on:
+    workflow_dispatch:
+        inputs:
+            bump:
+                description: "Bump type (patch, minor, major)"
+                required: true
+                default: "patch"
+                type: choice
+                options:
+                    - patch
+                    - minor
+                    - major
+            token:
+                description: "GitHub Token (PAT) to trigger CI. Leave empty to use secrets.REPO_PAT."
+                required: false
+                default: ""
+
+permissions:
+    contents: write
+
+jobs:
+    release:
+        uses: octopilot/octopilot-workflows/.github/workflows/workflow-release.yml@main
+        with:
+            mode: python
+            bump: ${{ github.event.inputs.bump }}
+            file: pyproject.toml
+        secrets:
+            repo_token: ${{ github.event.inputs.token || secrets.REPO_PAT }}
