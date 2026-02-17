@@ -15,4 +15,4 @@ runs:
   entrypoint: '/bin/sh'
   args:
     - '-c'
-    - 'op ${{ inputs.command }} ${{ inputs.args }}'
+    - 'cd $GITHUB_WORKSPACE && op ${{ inputs.command }} ${{ inputs.args }}'
