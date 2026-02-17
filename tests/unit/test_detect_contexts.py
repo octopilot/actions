@@ -126,6 +126,7 @@ build:
         assert rust_entry["language"] == "rust"
 
     @patch("detect.os.path.exists", return_value=False)
+    @patch("detect.os.environ", {})
     def test_main_no_skaffold_file(self, mock_exists, capsys):
         detect.main()
         captured = capsys.readouterr()
