@@ -1,0 +1,78 @@
+name: 'Build Ephemeral Image'
+description: 'Build and push an ephemeral container image to ttl.sh using Octopilot Pipeline Tools.'
+inputs:
+  ttl:
+    description: 'Time to live for the image (e.g. 2h, 1d).'
+    required: false
+    default: '2h'
+  op_version:
+    description: 'Version of octopilot-pipeline-tools to use.'
+    required: false
+    default: 'latest'
+  platform:
+    description: 'Platforms to build for (e.g. linux/amd64).'
+    required: false
+    default: 'linux/amd64'
+  registry:
+    description: 'Registry to push to (defaults to ttl.sh/owner-repo-sha).'
+    required: false
+    default: ''
+outputs:
+  image_ref:
+    description: 'The full reference to the pushed ephemeral image'
+    value: ${{ steps.build.outputs.image_ref }}
+runs:
+  using: "composite"
+  steps:
+    # --- Install op ---
+    - name: Install Octopilot Pipeline Tools (op)
+      shell: bash
+      run: |
+        OP_VERSION="${{ inputs.op_version }}"
+        if [ "$OP_VERSION" == "latest" ]; then
+           OP_VERSION=$(curl -s https://api.github.com/repos/octopilot/octopilot-pipeline-tools/releases/latest | jq -r .tag_name)
+        fi
+        
+        echo "Installing op version: $OP_VERSION"
+        
+        ARCH="amd64"
+        if [ "$(uname -m)" == "aarch64" ]; then
+          ARCH="arm64"
+        fi
+        OS="linux"
+
+        URL="https://github.com/octopilot/octopilot-pipeline-tools/releases/download/${OP_VERSION}/op-${OS}-${ARCH}"
+        curl -L -o op "$URL"
+        chmod +x op
+        sudo mv op /usr/local/bin/op
+
+    # --- Build & Push ---
+    - name: Build and Push
+      id: build
+      shell: bash
+      run: |
+        # Construct ephemeral tag
+        SHORT_SHA=$(git rev-parse --short HEAD)
+        TTL="${{ inputs.ttl }}"
+        
+        REPO_NAME="${{ github.event.repository.name }}"
+        OWNER="${{ github.repository_owner }}"
+        
+        # Default ephemeral registry strategy: ttl.sh/<owner>-<repo>-<short_sha>:<ttl>
+        if [ -z "${{ inputs.registry }}" ]; then
+          IMAGE_NAME="ttl.sh/${OWNER}-${REPO_NAME}-${SHORT_SHA}"
+        else
+          IMAGE_NAME="${{ inputs.registry }}"
+        fi
+        TAG="${TTL}"
+        
+        FULL_REF="${IMAGE_NAME}:${TAG}"
+        echo "Building ephemeral image: $FULL_REF"
+        
+        # Set DOCKER_METADATA_OUTPUT_VERSION to the tag (TTL) so `op` tags it correctly
+        export DOCKER_METADATA_OUTPUT_VERSION="${TAG}"
+        
+        # Run op build
+        op build --repo "${IMAGE_NAME}" --platform "${{ inputs.platform }}" --push
+        
+        echo "image_ref=${FULL_REF}" >> $GITHUB_OUTPUT
