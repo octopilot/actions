@@ -16,6 +16,7 @@ dev = [
     "pytest-cov>=4",
     "ruff>=0.15.0",
     "octopilot-actions-common",
+    "PyYAML",
 ]
 
 [tool.ruff]
