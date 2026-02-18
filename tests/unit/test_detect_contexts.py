@@ -243,8 +243,10 @@ build:
 
         # Verify Go entries
         go_1 = next((i for i in matrix if i["name"] == "app-go-1"), None)
+        assert go_1 is not None
         assert go_1["version"] == "1.21"
         go_2 = next((i for i in matrix if i["name"] == "app-go-2"), None)
+        assert go_2 is not None
         assert go_2["version"] == "1.22"
 
         # Verify consolidated languages

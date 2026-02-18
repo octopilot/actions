@@ -7,7 +7,7 @@ import tomllib  # Requires Python 3.11+
 import yaml
 
 
-def get_file_content(context_path, filename):
+def get_file_content(context_path: str, filename: str) -> str | None:
     try:
         with open(os.path.join(context_path, filename)) as f:
             return f.read()
@@ -15,7 +15,7 @@ def get_file_content(context_path, filename):
         return None
 
 
-def detect_go_version(context):
+def detect_go_version(context: str) -> str:
     content = get_file_content(context, "go.mod")
     if content:
         match = re.search(r"^go\s+(\S+)", content, re.MULTILINE)
@@ -24,7 +24,7 @@ def detect_go_version(context):
     return ""
 
 
-def detect_rust_version(context):
+def detect_rust_version(context: str) -> str:
     # Check rust-toolchain channel (e.g., stable, nightly, 1.70.0)
     for f in ["rust-toolchain", "rust-toolchain.toml"]:
         content = get_file_content(context, f)
@@ -39,7 +39,7 @@ def detect_rust_version(context):
     return ""
 
 
-def detect_node_version(context):
+def detect_node_version(context: str) -> str:
     # Check package.json engines or .nvmrc
     content = get_file_content(context, "package.json")
     if content:
@@ -57,7 +57,7 @@ def detect_node_version(context):
     return ""
 
 
-def detect_python_version(context):
+def detect_python_version(context: str) -> str:
     # Check pyproject.toml requires-python or .python-version
     content = get_file_content(context, "pyproject.toml")
     if content:
@@ -75,7 +75,7 @@ def detect_python_version(context):
     return ""
 
 
-def detect_java_version(context):
+def detect_java_version(context: str) -> str:
     # Check pom.xml or build.gradle
     content = get_file_content(context, "pom.xml")
     if content:
@@ -96,7 +96,7 @@ def detect_java_version(context):
     return ""
 
 
-def detect_project_info(context_path):
+def detect_project_info(context_path: str) -> dict[str, str | None] | None:
     """Detects language and version based on files in the context directory."""
     if not os.path.exists(context_path):
         return None
@@ -173,7 +173,13 @@ def main():
 
     # Output unique languages for lint workflow (comma-separated)
     # Fix C414/C401: Unnecessary list call within sorted(), set comprehension
-    unique_langs = sorted({item["language"] for item in matrix_include})
+    unique_langs_set: set[str] = set()
+    for item in matrix_include:
+        lang = item.get("language")
+        if isinstance(lang, str) and lang:
+            unique_langs_set.add(lang)
+
+    unique_langs = sorted(unique_langs_set)
     langs_output = ",".join(unique_langs)
 
     # Aggregate versions for repository-wide tools (e.g., lint)

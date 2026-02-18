@@ -17,6 +17,7 @@ dev = [
     "ruff>=0.15.0",
     "octopilot-actions-common",
     "PyYAML",
+    "pyre-check",
 ]
 
 [tool.ruff]

@@ -1,7 +1,7 @@
 # Install dependencies
 install:
     pip install -e ./common
-    pip install pytest pytest-cov ruff
+    pip install pytest pytest-cov ruff pyre-check
 
 # Run linting
 lint:
@@ -17,4 +17,7 @@ check-format:
 
 # Run tests
 test:
-    PYTHONPATH=common pytest tests/ -v
+
+# Run type checking
+check-types:
+    pyre

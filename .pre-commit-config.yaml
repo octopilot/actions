@@ -11,6 +11,4 @@ repos:
         name: Run Tests
         entry: bash -c 'PYTHONPATH=common pytest tests/'
         language: system
-        types: [python]
-        pass_filenames: false
         always_run: true
