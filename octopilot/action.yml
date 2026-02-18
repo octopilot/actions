@@ -1,22 +1,82 @@
-name: 'Octopilot'
-description: 'Run Octopilot CLI (op) commands to manage your pipelines.'
+name: 'Octopilot Build'
+description: 'Build and push container images using Octopilot Pipeline Tools.'
 inputs:
-  command:
-    description: 'The command to run (e.g., build, version)'
-    required: false
-    default: 'help'
-  args:
-    description: 'Arguments for the command'
+  version:
+    description: 'Version to build/tag (defaults to ref_name).'
     required: false
     default: ''
-  path:
-    description: 'Path to the project (directory containing skaffold.yaml)'
+  registry:
+    description: 'Target registry (e.g. ghcr.io/octopilot).'
+    required: true
+  platforms:
+    description: 'Comma-separated list of platforms to build for (e.g. linux/amd64).'
     required: false
-    default: '/github/workspace'
+    default: 'linux/amd64'
+  op_version:
+    description: 'Version of octopilot-pipeline-tools to use.'
+    required: false
+    default: 'latest'
+  sbom_output:
+    description: 'Path to output SBOMs.'
+    required: false
+    default: 'dist/sbom'
+outputs:
+  digest:
+    description: 'Container image digest.'
+    value: ${{ steps.build.outputs.digest }}
 runs:
-  using: 'docker'
-  image: 'docker://ghcr.io/octopilot/octopilot-pipeline-tools/octopilot-pipeline-tools:latest'
-  entrypoint: '/bin/sh'
-  args:
-    - '-c'
-    - 'cd ${{ inputs.path }} && op ${{ inputs.command }} ${{ inputs.args }}'
+  using: "composite"
+  steps:
+    - name: Build and Push
+      id: build
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_REGISTRY: ${{ inputs.registry }}
+        INPUT_PLATFORMS: ${{ inputs.platforms }}
+        INPUT_OP_VERSION: ${{ inputs.op_version }}
+        INPUT_SBOM_OUTPUT: ${{ inputs.sbom_output }}
+      run: |
+        # Determine version
+        VERSION="${INPUT_VERSION}"
+        if [ -z "$VERSION" ]; then
+          VERSION="${GITHUB_REF_NAME}"
+        fi
+
+        # Determine builder image tag
+        IMAGE_TAG="${INPUT_OP_VERSION}"
+        if [ "${IMAGE_TAG}" == "latest" ]; then
+            IMAGE_TAG="latest"
+        fi
+        
+        IMAGE="ghcr.io/octopilot/octopilot-pipeline-tools:${IMAGE_TAG}"
+        echo "Using builder image: $IMAGE"
+
+        # Create SBOM output directory
+        mkdir -p "${INPUT_SBOM_OUTPUT}"
+
+        # Run op build in container
+        # Mounts: docker socket, workspace
+        # Envs: DOCKER_METADATA_OUTPUT_VERSION, GITHUB_ACTIONS, CI
+        docker run --rm \
+            -v /var/run/docker.sock:/var/run/docker.sock \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            -w "/workspace" \
+            -e DOCKER_METADATA_OUTPUT_VERSION="${VERSION}" \
+            -e GITHUB_ACTIONS="true" \
+            -e CI="true" \
+            --entrypoint /bin/sh \
+            "$IMAGE" \
+            -c "git config --global --add safe.directory /workspace && op build --repo '${INPUT_REGISTRY}' --platform '${INPUT_PLATFORMS}' --push --sbom-output '${INPUT_SBOM_OUTPUT}'"
+
+        # Package SBOMs if directory exists and is not empty
+        if [ -d "${INPUT_SBOM_OUTPUT}" ] && [ "$(ls -A ${INPUT_SBOM_OUTPUT})" ]; then
+            tar -czvf "${INPUT_SBOM_OUTPUT}.tar.gz" -C "${INPUT_SBOM_OUTPUT}" .
+        fi
+
+        # Extract digest
+        if [ -f "build_result.json" ]; then
+            TAG=$(jq -r '.builds[0].tag' build_result.json)
+            DIGEST=$(echo "$TAG" | awk -F'@' '{print $2}')
+            echo "digest=$DIGEST" >> $GITHUB_OUTPUT
+        fi
