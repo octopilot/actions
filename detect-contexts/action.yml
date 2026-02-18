@@ -27,6 +27,9 @@ outputs:
   java-version:
     description: "Detected Java version (if any)"
     value: ${{ steps.detect.outputs.java-version }}
+  pipeline-context:
+    description: "Consolidated CI context object (JSON)"
+    value: ${{ steps.detect.outputs.pipeline-context }}
 runs:
   using: "composite"
   steps:

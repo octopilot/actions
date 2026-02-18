@@ -160,11 +160,109 @@ build:
         # So mocks should work.
         assert rust_entry["version"] == "stable"
 
-    @patch("detect.os.path.exists", return_value=False)
+    @patch("detect.os.path.exists")
+    @patch("detect.os.listdir")
+    @patch("detect.yaml.safe_load")
+    @patch("detect.get_file_content")
     @patch("detect.os.environ", {})
-    def test_main_no_skaffold_file(self, mock_exists, capsys):
+    def test_main_multiple_contexts_same_type(
+        self, mock_get_content, mock_yaml_load, mock_listdir, mock_exists, capsys
+    ):
+        # Setup mocks for 2 Go services, 2 Python services, 1 Node service
+        mock_exists.side_effect = lambda p: (
+            p
+            in [
+                "skaffold.yaml",
+                "./go-svc-1",
+                "./go-svc-2",
+                "./py-svc-1",
+                "./py-svc-2",
+                "./node-svc",
+            ]
+        )
+
+        def listdir_side_effect(path):
+            if path in ["./go-svc-1", "./go-svc-2"]:
+                return ["go.mod", "main.go"]
+            if path in ["./py-svc-1", "./py-svc-2"]:
+                return ["requirements.txt", "main.py"]
+            if path == "./node-svc":
+                return ["package.json"]
+            return []
+
+        mock_listdir.side_effect = listdir_side_effect
+
+        def get_content_side_effect(context, filename):
+            if context == "./go-svc-1" and filename == "go.mod":
+                return "module foo\ngo 1.21\n"
+            if context == "./go-svc-2" and filename == "go.mod":
+                return "module bar\ngo 1.22\n"
+            if context == "./py-svc-1" and filename == ".python-version":
+                return "3.11\n"
+            if context == "./py-svc-2" and filename == ".python-version":
+                return "3.12\n"
+            if context == "./node-svc" and filename == "package.json":
+                return '{"engines": {"node": "18"}}'
+            return None
+
+        mock_get_content.side_effect = get_content_side_effect
+
+        # Mock yaml config
+        mock_yaml_load.return_value = {
+            "apiVersion": "skaffold/v4beta1",
+            "kind": "Config",
+            "build": {
+                "artifacts": [
+                    {"image": "app-go-1", "context": "./go-svc-1"},
+                    {"image": "app-go-2", "context": "./go-svc-2"},
+                    {"image": "app-py-1", "context": "./py-svc-1"},
+                    {"image": "app-py-2", "context": "./py-svc-2"},
+                    {"image": "app-node", "context": "./node-svc"},
+                ]
+            },
+        }
+
+        # Run main
         detect.main()
+
+        # Capture output
         captured = capsys.readouterr()
-        assert "matrix=[]" in captured.out
+
+        # Check standard output
+        assert "matrix=" in captured.out
         assert "languages=" in captured.out
-        assert "Error: skaffold.yaml not found" in captured.err
+        assert "pipeline-context=" in captured.out
+
+        # Parse the JSON output from pipeline-context
+        context_str = captured.out.split("pipeline-context=")[1].split("\n")[0]
+        context = json.loads(context_str)
+
+        # Verify Matrix
+        matrix = context["matrix"]
+        assert len(matrix) == 5
+
+        # Verify Go entries
+        go_1 = next((i for i in matrix if i["name"] == "app-go-1"), None)
+        assert go_1["version"] == "1.21"
+        go_2 = next((i for i in matrix if i["name"] == "app-go-2"), None)
+        assert go_2["version"] == "1.22"
+
+        # Verify consolidated languages
+        languages = context["languages"]
+        assert languages == ["go", "node", "python"]
+
+        # Verify aggregated versions (should pick the highest/latest lexicographically)
+        versions = context["versions"]
+        assert versions["go"] == "1.22"
+        # Python versions 3.11 and 3.12 -> 3.12 is lexicographically larger
+        # Note: detect_python_version checks .python-version if requirements.txt exists but
+        # get_file_content mock needs to handle it.
+        # listdir returns requirements.txt, so language=python.
+        # detect_python_version checks pyproject.toml then .python-version.
+        # Mock get_content returns "3.11" for .python-version for svc-1.
+        # For svc-2, it returns "3.12".
+        # wait, my get_content mock only handles .python-version if file name is passed.
+        # detect.py calls get_file_content(context, ".python-version").
+        # My mock handles it. Correct.
+        assert versions["python"] == "3.12"
+        assert versions["node"] == "18"

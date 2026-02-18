@@ -188,16 +188,27 @@ def main():
             best_version = sorted(langs_versions)[-1]
             versions[lang] = best_version
 
+    # Create consolidated pipeline context
+    pipeline_context = {"matrix": matrix_include, "languages": unique_langs, "versions": versions}
+
+    # Also add individual version keys for convenience if needed,
+    # but the primary goal is to pass `pipeline_context` as a single object.
+    # For backward compatibility or ease of use, we keep the exploded outputs too.
+
+    pipeline_context_json = json.dumps(pipeline_context)
+
     # GitHub Actions Output Format
     if "GITHUB_OUTPUT" in os.environ:
         with open(os.environ["GITHUB_OUTPUT"], "a") as f:
             f.write(f"matrix={json_output}\n")
             f.write(f"languages={langs_output}\n")
+            f.write(f"pipeline-context={pipeline_context_json}\n")
             for lang, ver in versions.items():
                 f.write(f"{lang}-version={ver}\n")
     else:
         print(f"matrix={json_output}")  # noqa: T201
         print(f"languages={langs_output}")  # noqa: T201
+        print(f"pipeline-context={pipeline_context_json}")  # noqa: T201
         for lang, ver in versions.items():
             print(f"{lang}-version={ver}")  # noqa: T201
 
