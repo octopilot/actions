@@ -20,6 +20,14 @@ inputs:
     description: 'Path to output SBOMs.'
     required: false
     default: 'dist/sbom'
+  op_binary:
+    description: 'Path to op binary (used only when build_bypass is true).'
+    required: false
+    default: 'op'
+  build_bypass:
+    description: 'Bypass container execution and run op directly (for bootstrapping).'
+    required: false
+    default: 'false'
 outputs:
   digest:
     description: 'Container image digest.'
@@ -36,6 +44,8 @@ runs:
         INPUT_PLATFORMS: ${{ inputs.platforms }}
         INPUT_OP_VERSION: ${{ inputs.op_version }}
         INPUT_SBOM_OUTPUT: ${{ inputs.sbom_output }}
+        INPUT_OP_BINARY: ${{ inputs.op_binary }}
+        INPUT_BUILD_BYPASS: ${{ inputs.build_bypass }}
       run: |
         # Determine version
         VERSION="${INPUT_VERSION}"
@@ -43,31 +53,47 @@ runs:
           VERSION="${GITHUB_REF_NAME}"
         fi
 
-        # Determine builder image tag
-        IMAGE_TAG="${INPUT_OP_VERSION}"
-        if [ "${IMAGE_TAG}" == "latest" ]; then
-            IMAGE_TAG="latest"
-        fi
-        
-        IMAGE="ghcr.io/octopilot/octopilot-pipeline-tools:${IMAGE_TAG}"
-        echo "Using builder image: $IMAGE"
-
         # Create SBOM output directory
         mkdir -p "${INPUT_SBOM_OUTPUT}"
 
-        # Run op build in container
-        # Mounts: docker socket, workspace
-        # Envs: DOCKER_METADATA_OUTPUT_VERSION, GITHUB_ACTIONS, CI
-        docker run --rm \
-            -v /var/run/docker.sock:/var/run/docker.sock \
-            -v "$GITHUB_WORKSPACE:/workspace" \
-            -w "/workspace" \
-            -e DOCKER_METADATA_OUTPUT_VERSION="${VERSION}" \
-            -e GITHUB_ACTIONS="true" \
-            -e CI="true" \
-            --entrypoint /bin/sh \
-            "$IMAGE" \
-            -c "apk add git && git config --global --add safe.directory /workspace && op build --repo '${INPUT_REGISTRY}' --platform '${INPUT_PLATFORMS}' --push --sbom-output '${INPUT_SBOM_OUTPUT}'"
+        if [ "${INPUT_BUILD_BYPASS}" == "true" ]; then
+            echo "Bypassing container execution. Running op directly..."
+            export DOCKER_METADATA_OUTPUT_VERSION="${VERSION}"
+            
+            # Ensure safe directory
+            git config --global --add safe.directory "$GITHUB_WORKSPACE"
+            
+            # Run op directly
+            ${INPUT_OP_BINARY} build --repo "${INPUT_REGISTRY}" --platform "${INPUT_PLATFORMS}" --push --sbom-output "${INPUT_SBOM_OUTPUT}"
+        else
+            # Determine builder image tag
+            IMAGE_TAG="${INPUT_OP_VERSION}"
+            if [ "${IMAGE_TAG}" == "latest" ]; then
+                IMAGE_TAG="latest"
+            fi
+            
+            IMAGE="ghcr.io/octopilot/octopilot-pipeline-tools:${IMAGE_TAG}"
+            echo "Using builder image: $IMAGE"
+
+            # Run op build in container
+            # Mounts: docker socket, workspace
+            # Envs: DOCKER_METADATA_OUTPUT_VERSION, GITHUB_ACTIONS, CI
+            docker run --rm \
+                -v /var/run/docker.sock:/var/run/docker.sock \
+                -v "$GITHUB_WORKSPACE:/workspace" \
+                -w "/workspace" \
+                -e DOCKER_METADATA_OUTPUT_VERSION="${VERSION}" \
+                -e GITHUB_ACTIONS="true" \
+                -e CI="true" \
+                --entrypoint /bin/sh \
+                "$IMAGE" \
+                -c "git config --global --add safe.directory /workspace && op build --repo '${INPUT_REGISTRY}' --platform '${INPUT_PLATFORMS}' --push --sbom-output '${INPUT_SBOM_OUTPUT}'"
+        fi
+
+        # Package SBOMs if directory exists and is not empty
+        if [ -d "${INPUT_SBOM_OUTPUT}" ] && [ "$(ls -A ${INPUT_SBOM_OUTPUT})" ]; then
+            tar -czvf "${INPUT_SBOM_OUTPUT}.tar.gz" -C "${INPUT_SBOM_OUTPUT}" .
+        fi
 
         # Package SBOMs if directory exists and is not empty
         if [ -d "${INPUT_SBOM_OUTPUT}" ] && [ "$(ls -A ${INPUT_SBOM_OUTPUT})" ]; then
