@@ -1,0 +1,33 @@
+name: 'Build Self-Homing (Internal)'
+description: 'Internal action to build Octopilot CLI binaries for release.'
+inputs:
+  version:
+    description: 'Version to inject into the binary (e.g., v0.1.0).'
+    required: true
+  output_dir:
+    description: 'Directory to output binaries.'
+    required: false
+    default: 'dist'
+runs:
+  using: "composite"
+  steps:
+    - name: Build Binaries
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_OUTPUT_DIR: ${{ inputs.output_dir }}
+      run: |
+        platforms=("linux/amd64" "linux/arm64" "darwin/amd64" "darwin/arm64")
+        mkdir -p "${INPUT_OUTPUT_DIR}"
+        
+        for platform in "${platforms[@]}"; do
+          GOOS=${platform%/*}
+          GOARCH=${platform#*/}
+          output_name="op-${GOOS}-${GOARCH}"
+          echo "Building ${output_name}..."
+          
+          GOOS=$GOOS GOARCH=$GOARCH go build \
+            -ldflags="-X 'github.com/octopilot/octopilot-pipeline-tools/internal/cmd.Version=${INPUT_VERSION}'" \
+            -o "${INPUT_OUTPUT_DIR}/${output_name}" \
+            ./cmd/op
+        done
