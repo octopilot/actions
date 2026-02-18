@@ -67,7 +67,7 @@ runs:
             -e CI="true" \
             --entrypoint /bin/sh \
             "$IMAGE" \
-            -c "git config --global --add safe.directory /workspace && op build --repo '${INPUT_REGISTRY}' --platform '${INPUT_PLATFORMS}' --push --sbom-output '${INPUT_SBOM_OUTPUT}'"
+            -c "apk add git && git config --global --add safe.directory /workspace && op build --repo '${INPUT_REGISTRY}' --platform '${INPUT_PLATFORMS}' --push --sbom-output '${INPUT_SBOM_OUTPUT}'"
 
         # Package SBOMs if directory exists and is not empty
         if [ -d "${INPUT_SBOM_OUTPUT}" ] && [ "$(ls -A ${INPUT_SBOM_OUTPUT})" ]; then
