@@ -4,35 +4,30 @@ description: >
   Node, Python, Java) are set up conditionally based on the languages detected
   in the pipeline-context produced by detect-contexts.
 
-# ── Language-specific gotchas ────────────────────────────────────────────────
+# ── Language-specific gotchas & resolutions ──────────────────────────────────
 #
-# Go — golangci-lint timeout
-#   golangci-lint defaults to a 1-minute timeout. Projects with large vendor
-#   trees (e.g. those that vendor Skaffold, pack, or go-containerregistry) will
-#   hit "context deadline exceeded" / exit code 4 on cold CI runners.
-#   Fix: add a .golangci.yml at the repo root with a longer timeout:
+# Go — golangci-lint timeout / .golangci.yml not respected by pre-commit hook
+#   The pre-commit golangci-lint hook runs inside its own sandboxed virtual
+#   environment. It does NOT reliably read .golangci.yml, which means the
+#   `run.timeout` directive is silently ignored on large vendor trees, causing
+#   "context deadline exceeded" (exit code 4).
+#   Resolution: this action uses golangci/golangci-lint-action@v6 instead of
+#   the pre-commit hook for Go repos. That action reads .golangci.yml correctly
+#   (including run.timeout). The pre-commit hook is skipped via SKIP=golangci-lint
+#   to avoid double-running.
+#   Still add .golangci.yml with a longer timeout for local `pre-commit run`:
 #
 #     run:
 #       timeout: 10m
 #
-#   The pre-commit golangci-lint hook reads this file automatically.
+# Go — golangci-lint binary compiled with older Go than go.mod requires
+#   In CI: resolved automatically — golangci-lint-action downloads a compatible
+#   binary. No action needed.
+#   Locally: install using GOTOOLCHAIN so the binary is compiled with the
+#   correct Go version:
 #
-# Go — golangci-lint Go version mismatch
-#   If golangci-lint was compiled with an older Go than the project's go.mod
-#   `go` directive specifies, it exits with:
-#     "the Go language version (goX.Y) used to build golangci-lint is lower
-#      than the targeted Go version (X.Y.Z)"
-#   Fix: pin the pre-commit rev to a golangci-lint release that was built with
-#   Go >= your project's go.mod version, and keep your local install in sync:
-#
-#     # In .pre-commit-config.yaml
-#     - repo: https://github.com/golangci/golangci-lint
-#       rev: v1.64.8   # must be built with Go >= go.mod's `go` directive
-#
-#     # Local install (run once after cloning)
-#     GOVERSION=$(grep '^go ' go.mod | awk '{print $2}')
-#     GOTOOLCHAIN="go${GOVERSION}" go install \
-#       github.com/golangci/golangci-lint/cmd/golangci-lint@latest
+#     GOTOOLCHAIN="go$(grep '^go ' go.mod | awk '{print $2}')" \
+#       go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest
 #
 # ── Future gotchas ───────────────────────────────────────────────────────────
 # Add new entries here as they are discovered while dogfooding this action
@@ -107,6 +102,22 @@ runs:
         distribution: temurin
         java-version: ${{ steps.ctx.outputs.java_version || '17' }}
 
+    # ── Go: run golangci-lint via its dedicated action ────────────────────────
+    # The pre-commit golangci-lint hook runs inside its own sandboxed virtual
+    # environment and does not reliably read .golangci.yml (the timeout
+    # directive is silently ignored, causing "context deadline exceeded" on
+    # large vendor trees). golangci/golangci-lint-action:
+    #   • reads .golangci.yml correctly (including run.timeout)
+    #   • caches build artefacts across runs for faster subsequent executions
+    #   • manages the golangci-lint binary version automatically
+    # We skip the golangci-lint hook in the pre-commit step below to avoid
+    # running it twice.
+    - name: Run golangci-lint
+      if: steps.ctx.outputs.has_go == 'true'
+      uses: golangci/golangci-lint-action@v6
+      with:
+        version: latest
+
     # ── pre-commit ────────────────────────────────────────────────────────────
 
     - name: Install pre-commit
@@ -123,4 +134,8 @@ runs:
 
     - name: Run pre-commit
       shell: bash
+      env:
+        # Skip the golangci-lint hook when Go is present — it is run above via
+        # golangci/golangci-lint-action which correctly reads .golangci.yml.
+        SKIP: ${{ steps.ctx.outputs.has_go == 'true' && 'golangci-lint' || '' }}
       run: pre-commit run --all-files
