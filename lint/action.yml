@@ -45,6 +45,13 @@ inputs:
       pre-commit so that language-specific hooks (rustfmt, golangci-lint, etc.)
       can execute successfully.
     required: true
+  golangci-lint-timeout:
+    description: >
+      Timeout passed to golangci-lint via --timeout. Increase for projects
+      with large vendor trees. golangci-lint-action@v6 overrides the
+      run.timeout value in .golangci.yml, so this must be set explicitly.
+    required: false
+    default: '10m'
 
 runs:
   using: "composite"
@@ -128,6 +135,11 @@ runs:
         #   "the Go language version (goX.Y) used to build golangci-lint is
         #    lower than the targeted Go version (X.Y.Z)"
         install-mode: goinstall
+        # golangci-lint-action@v6 passes --timeout internally and overrides
+        # the run.timeout value in .golangci.yml. Set it from the input so
+        # callers can tune it for their vendor tree size.
+        args: --timeout=${{ inputs['golangci-lint-timeout'] }}
+
 
     # ── pre-commit ────────────────────────────────────────────────────────────
 
