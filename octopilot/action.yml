@@ -80,12 +80,19 @@ runs:
             IMAGE="ghcr.io/octopilot/op:${IMAGE_TAG}"
             echo "Using builder image: $IMAGE"
 
-            # Run op build in container
-            # Mounts: docker socket, workspace
-            # Envs: DOCKER_METADATA_OUTPUT_VERSION, GITHUB_ACTIONS, CI
+            # Run op build in container.
+            # Mounts:
+            #   docker socket  — so op/pack can call the host Docker daemon
+            #   workspace      — source code to build
+            #   ~/.docker      — host registry credentials (read-only) so that
+            #                    the Pack ANALYZE phase can authenticate with GHCR
+            #                    to check for existing layers. Without this mount
+            #                    the lifecycle gets DENIED even on a first push
+            #                    because private registry checks require auth.
             docker run --rm \
                 -v /var/run/docker.sock:/var/run/docker.sock \
                 -v "$GITHUB_WORKSPACE:/workspace" \
+                -v "${HOME}/.docker:/root/.docker:ro" \
                 -w "/workspace" \
                 -e DOCKER_METADATA_OUTPUT_VERSION="${VERSION}" \
                 -e GITHUB_ACTIONS="true" \
