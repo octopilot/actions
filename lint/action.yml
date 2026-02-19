@@ -15,39 +15,62 @@ inputs:
 runs:
   using: "composite"
   steps:
+    # ── Parse JSON into individual step outputs ───────────────────────────────
+    # fromJson() is not permitted in composite action step `if:` conditions, so
+    # we extract all fields here and reference `steps.ctx.outputs.*` below.
+    - name: Parse context
+      id: ctx
+      shell: bash
+      env:
+        PIPELINE_CONTEXT: ${{ inputs['pipeline-context'] }}
+      run: |
+        has()  { echo "$PIPELINE_CONTEXT" | jq -r --arg l "$1" 'if (.languages | index($l)) then "true" else "false" end'; }
+        ver()  { echo "$PIPELINE_CONTEXT" | jq -r --arg l "$1" '.versions[$l] // ""'; }
+
+        echo "has_go=$(has go)"           >> "$GITHUB_OUTPUT"
+        echo "has_rust=$(has rust)"       >> "$GITHUB_OUTPUT"
+        echo "has_node=$(has node)"       >> "$GITHUB_OUTPUT"
+        echo "has_python=$(has python)"   >> "$GITHUB_OUTPUT"
+        echo "has_java=$(has java)"       >> "$GITHUB_OUTPUT"
+        echo "go_version=$(ver go)"       >> "$GITHUB_OUTPUT"
+        echo "rust_version=$(ver rust)"   >> "$GITHUB_OUTPUT"
+        echo "node_version=$(ver node)"   >> "$GITHUB_OUTPUT"
+        echo "python_version=$(ver python)" >> "$GITHUB_OUTPUT"
+        echo "java_version=$(ver java)"   >> "$GITHUB_OUTPUT"
+
     # ── Language toolchain setup (conditional on detected languages) ──────────
 
     - name: Setup Go
-      if: contains(fromJson(inputs['pipeline-context']).languages, 'go')
+      if: steps.ctx.outputs.has_go == 'true'
       uses: actions/setup-go@v5
       with:
-        go-version: ${{ fromJson(inputs['pipeline-context']).versions.go || '1.24' }}
+        go-version: ${{ steps.ctx.outputs.go_version || '1.24' }}
 
     - name: Setup Rust
-      if: contains(fromJson(inputs['pipeline-context']).languages, 'rust')
+      if: steps.ctx.outputs.has_rust == 'true'
       uses: dtolnay/rust-toolchain@master
       with:
-        toolchain: ${{ fromJson(inputs['pipeline-context']).versions.rust || 'stable' }}
+        toolchain: ${{ steps.ctx.outputs.rust_version || 'stable' }}
         components: rustfmt, clippy
 
     - name: Setup Node
-      if: contains(fromJson(inputs['pipeline-context']).languages, 'node')
+      if: steps.ctx.outputs.has_node == 'true'
       uses: actions/setup-node@v4
       with:
-        node-version: ${{ fromJson(inputs['pipeline-context']).versions.node || '20' }}
+        node-version: ${{ steps.ctx.outputs.node_version || '20' }}
 
     - name: Setup Python
-      if: contains(fromJson(inputs['pipeline-context']).languages, 'python')
+      if: steps.ctx.outputs.has_python == 'true'
       uses: actions/setup-python@v5
       with:
-        python-version: ${{ fromJson(inputs['pipeline-context']).versions.python || '3.12' }}
+        python-version: ${{ steps.ctx.outputs.python_version || '3.12' }}
 
     - name: Setup Java
-      if: contains(fromJson(inputs['pipeline-context']).languages, 'java')
+      if: steps.ctx.outputs.has_java == 'true'
       uses: actions/setup-java@v4
       with:
         distribution: temurin
-        java-version: ${{ fromJson(inputs['pipeline-context']).versions.java || '17' }}
+        java-version: ${{ steps.ctx.outputs.java_version || '17' }}
 
     # ── pre-commit ────────────────────────────────────────────────────────────
 

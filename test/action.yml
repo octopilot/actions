@@ -17,59 +17,73 @@ inputs:
 runs:
   using: "composite"
   steps:
+    # ── Parse JSON into individual step outputs ───────────────────────────────
+    # fromJson() is not permitted in composite action step `if:` conditions, so
+    # we extract all fields here and reference `steps.ctx.outputs.*` below.
+    - name: Parse context
+      id: ctx
+      shell: bash
+      env:
+        PIPELINE_CONTEXT: ${{ inputs['pipeline-context'] }}
+      run: |
+        echo "language=$(echo "$PIPELINE_CONTEXT"  | jq -r '.language')"         >> "$GITHUB_OUTPUT"
+        echo "version=$(echo "$PIPELINE_CONTEXT"   | jq -r '.version  // ""')"   >> "$GITHUB_OUTPUT"
+        echo "context=$(echo "$PIPELINE_CONTEXT"   | jq -r '.context  // "."')"  >> "$GITHUB_OUTPUT"
+        echo "command=$(echo "$PIPELINE_CONTEXT"   | jq -r '.command  // ""')"   >> "$GITHUB_OUTPUT"
+
     # ── Toolchain setup (one branch executes per matrix item) ─────────────────
 
     - name: Setup Go
-      if: fromJson(inputs['pipeline-context']).language == 'go'
+      if: steps.ctx.outputs.language == 'go'
       uses: actions/setup-go@v5
       with:
-        go-version: ${{ fromJson(inputs['pipeline-context']).version || '1.24' }}
+        go-version: ${{ steps.ctx.outputs.version || '1.24' }}
 
     - name: Setup Rust
-      if: fromJson(inputs['pipeline-context']).language == 'rust'
+      if: steps.ctx.outputs.language == 'rust'
       uses: dtolnay/rust-toolchain@master
       with:
-        toolchain: ${{ fromJson(inputs['pipeline-context']).version || 'stable' }}
+        toolchain: ${{ steps.ctx.outputs.version || 'stable' }}
 
     - name: Setup Python
-      if: fromJson(inputs['pipeline-context']).language == 'python'
+      if: steps.ctx.outputs.language == 'python'
       uses: actions/setup-python@v5
       with:
-        python-version: ${{ fromJson(inputs['pipeline-context']).version || '3.12' }}
+        python-version: ${{ steps.ctx.outputs.version || '3.12' }}
 
     - name: Setup Node
-      if: fromJson(inputs['pipeline-context']).language == 'node'
+      if: steps.ctx.outputs.language == 'node'
       uses: actions/setup-node@v4
       with:
-        node-version: ${{ fromJson(inputs['pipeline-context']).version || '20' }}
+        node-version: ${{ steps.ctx.outputs.version || '20' }}
 
     # ── Test execution ─────────────────────────────────────────────────────────
 
     - name: Run Tests (Go)
-      if: fromJson(inputs['pipeline-context']).language == 'go'
+      if: steps.ctx.outputs.language == 'go'
       shell: bash
-      working-directory: ${{ fromJson(inputs['pipeline-context']).context }}
-      run: ${{ fromJson(inputs['pipeline-context']).command || 'go test -v ./...' }}
+      working-directory: ${{ steps.ctx.outputs.context }}
+      run: ${{ steps.ctx.outputs.command || 'go test -v ./...' }}
 
     - name: Run Tests (Rust)
-      if: fromJson(inputs['pipeline-context']).language == 'rust'
+      if: steps.ctx.outputs.language == 'rust'
       shell: bash
-      working-directory: ${{ fromJson(inputs['pipeline-context']).context }}
-      run: ${{ fromJson(inputs['pipeline-context']).command || 'cargo test' }}
+      working-directory: ${{ steps.ctx.outputs.context }}
+      run: ${{ steps.ctx.outputs.command || 'cargo test' }}
 
     - name: Run Tests (Python)
-      if: fromJson(inputs['pipeline-context']).language == 'python'
+      if: steps.ctx.outputs.language == 'python'
       shell: bash
-      working-directory: ${{ fromJson(inputs['pipeline-context']).context }}
+      working-directory: ${{ steps.ctx.outputs.context }}
       run: |
         pip install -r requirements.txt || true
         pip install pytest
-        ${{ fromJson(inputs['pipeline-context']).command || 'pytest' }}
+        ${{ steps.ctx.outputs.command || 'pytest' }}
 
     - name: Run Tests (Node)
-      if: fromJson(inputs['pipeline-context']).language == 'node'
+      if: steps.ctx.outputs.language == 'node'
       shell: bash
-      working-directory: ${{ fromJson(inputs['pipeline-context']).context }}
+      working-directory: ${{ steps.ctx.outputs.context }}
       run: |
         npm ci || npm install
-        ${{ fromJson(inputs['pipeline-context']).command || 'npm test' }}
+        ${{ steps.ctx.outputs.command || 'npm test' }}
