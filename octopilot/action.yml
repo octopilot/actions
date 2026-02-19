@@ -77,7 +77,7 @@ runs:
                 IMAGE_TAG="latest"
             fi
             
-            IMAGE="ghcr.io/octopilot/octopilot-pipeline-tools:${IMAGE_TAG}"
+            IMAGE="ghcr.io/octopilot/op:${IMAGE_TAG}"
             echo "Using builder image: $IMAGE"
 
             # Run op build in container
