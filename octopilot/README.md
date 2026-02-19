@@ -144,4 +144,33 @@ jobs:
   `<sbom_output>.tar.gz` automatically.
 - **Disk space**: Multi-arch buildpack builds are large. If running on `ubuntu-latest`, consider
   freeing unused toolchains (Android SDK, .NET, etc.) before this action. See
-  `octopilot/actions/setup-tools` or use `just free-disk` from `octopilot-pipeline-tools`.
+  `octopilot/actions/janitor` or use `just free-disk` from `octopilot-pipeline-tools`.
+
+## Known Gotchas
+
+### Container mode — GHCR `DENIED` on first push (or any private registry)
+
+**Symptom:** Pack's ANALYZE phase fails with:
+```
+DENIED: requested access to the resource is denied
+```
+even when `docker/login-action` ran successfully in the same job.
+
+**Cause:** In container mode (`build_bypass: false`), `op build` runs inside
+`ghcr.io/octopilot/op`. `docker/login-action` stores credentials in
+`~/.docker/config.json` **on the host runner**, but that file is not inside
+the container. Pack makes direct HTTPS calls to the registry API (not through
+the Docker daemon) during the ANALYZE phase — without the credentials it gets
+`DENIED` even for a simple "does this image exist?" check, which GHCR requires
+auth for.
+
+**Fix:** This is already handled automatically — the action mounts
+`${HOME}/.docker` read-only into the container so Pack finds the same
+credentials the host Docker daemon has.
+
+If you see this error it means the action predates the fix. Upgrade to the
+latest `octopilot/actions/octopilot@main`.
+
+**Why bypass mode doesn't have this problem:** With `build_bypass: true`, `op`
+runs directly on the host runner which already has the credentials. The
+container credential mount is not needed.
