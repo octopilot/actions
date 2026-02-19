@@ -76,8 +76,14 @@ runs:
       shell: bash
       working-directory: ${{ steps.ctx.outputs.context }}
       run: |
-        pip install -r requirements.txt || true
-        pip install pytest
+        # pyproject.toml-based projects (PEP 517/518): install with dev extras first.
+        # requirements.txt-based projects: install that instead.
+        # Both patterns are tried so the action works for all Python project layouts.
+        if [ -f pyproject.toml ]; then
+          pip install -e ".[dev]" 2>/dev/null || pip install -e . 2>/dev/null || true
+        elif [ -f requirements.txt ]; then
+          pip install -r requirements.txt
+        fi
         ${{ steps.ctx.outputs.command || 'pytest' }}
 
     - name: Run Tests (Node)
