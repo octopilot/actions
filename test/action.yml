@@ -11,7 +11,7 @@ inputs:
       A single matrix item (JSON string) from detect-contexts
       pipeline-context.matrix. Contains: language, version, context, name,
       and optionally command.
-      Pass with: pipeline-context: ${{ toJson(matrix) }}
+      In the calling workflow pass: pipeline-context: toJson(matrix)
     required: true
 
 runs:
