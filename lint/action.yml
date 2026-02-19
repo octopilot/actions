@@ -21,8 +21,12 @@ description: >
 #       timeout: 10m
 #
 # Go — golangci-lint binary compiled with older Go than go.mod requires
-#   In CI: resolved automatically — golangci-lint-action downloads a compatible
-#   binary. No action needed.
+#   golangci-lint pre-built releases are compiled with a specific Go version.
+#   If that version is older than the project's go.mod `go` directive,
+#   golangci-lint exits with "the Go language version (goX.Y) used to build
+#   golangci-lint is lower than the targeted Go version (X.Y.Z)".
+#   In CI: resolved via install-mode: goinstall (see step below) — compiles
+#   from source using the go1.X.Y toolchain set up by actions/setup-go.
 #   Locally: install using GOTOOLCHAIN so the binary is compiled with the
 #   correct Go version:
 #
@@ -117,6 +121,13 @@ runs:
       uses: golangci/golangci-lint-action@v6
       with:
         version: latest
+        # install-mode: goinstall compiles golangci-lint from source using the
+        # Go toolchain already configured by actions/setup-go above (go1.25.6
+        # in this case). The default binary download mode grabs a pre-built
+        # release that may have been compiled with an older Go, causing:
+        #   "the Go language version (goX.Y) used to build golangci-lint is
+        #    lower than the targeted Go version (X.Y.Z)"
+        install-mode: goinstall
 
     # ── pre-commit ────────────────────────────────────────────────────────────
 
