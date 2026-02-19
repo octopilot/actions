@@ -1,0 +1,75 @@
+name: 'Test'
+description: >
+  Runs tests for a single language context item. Receives one entry from the
+  pipeline-context matrix produced by detect-contexts, sets up the appropriate
+  toolchain, and executes the test command for that language.
+  The matrix fan-out (strategy.matrix) must be declared in the calling workflow;
+  this action handles the per-item setup and execution.
+inputs:
+  pipeline-context:
+    description: >
+      A single matrix item (JSON string) from detect-contexts
+      pipeline-context.matrix. Contains: language, version, context, name,
+      and optionally command.
+      Pass with: pipeline-context: ${{ toJson(matrix) }}
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    # ── Toolchain setup (one branch executes per matrix item) ─────────────────
+
+    - name: Setup Go
+      if: fromJson(inputs['pipeline-context']).language == 'go'
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ fromJson(inputs['pipeline-context']).version || '1.24' }}
+
+    - name: Setup Rust
+      if: fromJson(inputs['pipeline-context']).language == 'rust'
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ fromJson(inputs['pipeline-context']).version || 'stable' }}
+
+    - name: Setup Python
+      if: fromJson(inputs['pipeline-context']).language == 'python'
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ fromJson(inputs['pipeline-context']).version || '3.12' }}
+
+    - name: Setup Node
+      if: fromJson(inputs['pipeline-context']).language == 'node'
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ fromJson(inputs['pipeline-context']).version || '20' }}
+
+    # ── Test execution ─────────────────────────────────────────────────────────
+
+    - name: Run Tests (Go)
+      if: fromJson(inputs['pipeline-context']).language == 'go'
+      shell: bash
+      working-directory: ${{ fromJson(inputs['pipeline-context']).context }}
+      run: ${{ fromJson(inputs['pipeline-context']).command || 'go test -v ./...' }}
+
+    - name: Run Tests (Rust)
+      if: fromJson(inputs['pipeline-context']).language == 'rust'
+      shell: bash
+      working-directory: ${{ fromJson(inputs['pipeline-context']).context }}
+      run: ${{ fromJson(inputs['pipeline-context']).command || 'cargo test' }}
+
+    - name: Run Tests (Python)
+      if: fromJson(inputs['pipeline-context']).language == 'python'
+      shell: bash
+      working-directory: ${{ fromJson(inputs['pipeline-context']).context }}
+      run: |
+        pip install -r requirements.txt || true
+        pip install pytest
+        ${{ fromJson(inputs['pipeline-context']).command || 'pytest' }}
+
+    - name: Run Tests (Node)
+      if: fromJson(inputs['pipeline-context']).language == 'node'
+      shell: bash
+      working-directory: ${{ fromJson(inputs['pipeline-context']).context }}
+      run: |
+        npm ci || npm install
+        ${{ fromJson(inputs['pipeline-context']).command || 'npm test' }}

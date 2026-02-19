@@ -1,0 +1,68 @@
+name: 'Lint'
+description: >
+  Runs pre-commit linting against the workspace. Language toolchains (Go, Rust,
+  Node, Python, Java) are set up conditionally based on the languages detected
+  in the pipeline-context produced by detect-contexts.
+inputs:
+  pipeline-context:
+    description: >
+      Consolidated CI context object (JSON) produced by detect-contexts.
+      Used to determine which language toolchains to set up before running
+      pre-commit so that language-specific hooks (rustfmt, golangci-lint, etc.)
+      can execute successfully.
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    # ── Language toolchain setup (conditional on detected languages) ──────────
+
+    - name: Setup Go
+      if: contains(fromJson(inputs['pipeline-context']).languages, 'go')
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ fromJson(inputs['pipeline-context']).versions.go || '1.24' }}
+
+    - name: Setup Rust
+      if: contains(fromJson(inputs['pipeline-context']).languages, 'rust')
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ fromJson(inputs['pipeline-context']).versions.rust || 'stable' }}
+        components: rustfmt, clippy
+
+    - name: Setup Node
+      if: contains(fromJson(inputs['pipeline-context']).languages, 'node')
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ fromJson(inputs['pipeline-context']).versions.node || '20' }}
+
+    - name: Setup Python
+      if: contains(fromJson(inputs['pipeline-context']).languages, 'python')
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ fromJson(inputs['pipeline-context']).versions.python || '3.12' }}
+
+    - name: Setup Java
+      if: contains(fromJson(inputs['pipeline-context']).languages, 'java')
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: ${{ fromJson(inputs['pipeline-context']).versions.java || '17' }}
+
+    # ── pre-commit ────────────────────────────────────────────────────────────
+
+    - name: Install pre-commit
+      shell: bash
+      run: pip install pre-commit
+
+    - name: Cache pre-commit environments
+      uses: actions/cache@v4
+      with:
+        path: ~/.cache/pre-commit
+        key: pre-commit-${{ runner.os }}-${{ hashFiles('.pre-commit-config.yaml') }}
+        restore-keys: |
+          pre-commit-${{ runner.os }}-
+
+    - name: Run pre-commit
+      shell: bash
+      run: pre-commit run --all-files

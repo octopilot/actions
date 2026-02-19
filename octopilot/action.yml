@@ -59,12 +59,17 @@ runs:
         if [ "${INPUT_BUILD_BYPASS}" == "true" ]; then
             echo "Bypassing container execution. Running op directly..."
             export DOCKER_METADATA_OUTPUT_VERSION="${VERSION}"
+            export GITHUB_ACTIONS="true"
+            export CI="true"
             
             # Ensure safe directory
             git config --global --add safe.directory "$GITHUB_WORKSPACE"
             
+            # Ensure op is executable
+            chmod +x "${INPUT_OP_BINARY}"
+            
             # Run op directly
-            ${INPUT_OP_BINARY} build --repo "${INPUT_REGISTRY}" --platform "${INPUT_PLATFORMS}" --push --sbom-output "${INPUT_SBOM_OUTPUT}"
+            "${INPUT_OP_BINARY}" build --repo "${INPUT_REGISTRY}" --platform "${INPUT_PLATFORMS}" --push --sbom-output "${INPUT_SBOM_OUTPUT}"
         else
             # Determine builder image tag
             IMAGE_TAG="${INPUT_OP_VERSION}"
@@ -95,14 +100,11 @@ runs:
             tar -czvf "${INPUT_SBOM_OUTPUT}.tar.gz" -C "${INPUT_SBOM_OUTPUT}" .
         fi
 
-        # Package SBOMs if directory exists and is not empty
-        if [ -d "${INPUT_SBOM_OUTPUT}" ] && [ "$(ls -A ${INPUT_SBOM_OUTPUT})" ]; then
-            tar -czvf "${INPUT_SBOM_OUTPUT}.tar.gz" -C "${INPUT_SBOM_OUTPUT}" .
-        fi
-
-        # Extract digest
+        # Extract digest from the last build entry (application image).
+        # builds[0] is typically the base image when skaffold.yaml defines
+        # multiple artifacts; the application image is always last by convention.
         if [ -f "build_result.json" ]; then
-            TAG=$(jq -r '.builds[0].tag' build_result.json)
+            TAG=$(jq -r '.builds[-1].tag' build_result.json)
             DIGEST=$(echo "$TAG" | awk -F'@' '{print $2}')
             echo "digest=$DIGEST" >> $GITHUB_OUTPUT
         fi
