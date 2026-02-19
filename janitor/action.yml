@@ -1,0 +1,88 @@
+name: 'Janitor'
+description: >
+  Frees disk space on GitHub-hosted ubuntu-latest runners by removing
+  toolchains and SDKs that are not needed in the current job.
+
+  Every removable path is mapped to one or more languages. A path is only
+  removed if none of its associated languages appear in the pipeline-context
+  produced by detect-contexts. This means the action is fully driven by
+  what was actually detected — no assumptions about what is "always safe".
+
+  When pipeline-context is omitted or empty, all paths are removed (the
+  safe default for jobs that need no language toolchains at all, such as
+  Docker-only container build jobs).
+
+  Logs disk usage before and after so space recovered is visible in the
+  job summary.
+
+inputs:
+  pipeline-context:
+    description: >
+      Optional consolidated CI context JSON from detect-contexts. Every
+      removable path is kept if its associated language is listed in
+      context.languages. Omit for Docker-only jobs to remove everything.
+    required: false
+    default: ''
+
+runs:
+  using: "composite"
+  steps:
+    - name: Free runner disk space
+      shell: bash
+      env:
+        PIPELINE_CONTEXT: ${{ inputs['pipeline-context'] }}
+      run: |
+        echo "=== Disk before cleanup ==="
+        df -h /
+
+        # Parse detected languages into a space-separated list.
+        # When no context is provided, detected_langs stays empty and every
+        # path is removed (nothing is "needed").
+        detected_langs=""
+        if [ -n "$PIPELINE_CONTEXT" ] && [ "$PIPELINE_CONTEXT" != "{}" ]; then
+          detected_langs=$(echo "$PIPELINE_CONTEXT" | jq -r '.languages // [] | join(" ")')
+          echo "Detected languages: ${detected_langs:-<none>}"
+        else
+          echo "No pipeline-context — removing all toolchains."
+        fi
+
+        # Returns 0 (true) if the given language was detected.
+        needs() {
+          for lang in $detected_langs; do
+            [ "$lang" == "$1" ] && return 0
+          done
+          return 1
+        }
+
+        # Remove a path unless at least one of its associated languages was
+        # detected. Accepts one path and one or more language names.
+        clean_unless() {
+          local path="$1"; shift
+          for lang in "$@"; do
+            if needs "$lang"; then
+              echo "Keeping  $path  (detected: $lang)"
+              return 0
+            fi
+          done
+          echo "Removing $path"
+          sudo rm -rf "$path" || true
+        }
+
+        # ── Path → required languages ─────────────────────────────────────────
+        # Add new entries here as detect-contexts gains support for more languages.
+        clean_unless /usr/local/lib/android        java
+        clean_unless /usr/share/dotnet             dotnet
+        clean_unless /opt/ghc                      haskell
+        clean_unless /usr/local/.ghcup             haskell
+        clean_unless /usr/lib/jvm                  java
+        clean_unless /usr/share/swift              swift
+        clean_unless /usr/local/share/boost        cpp
+        clean_unless /usr/share/gradle-8.8         java
+        clean_unless /opt/hostedtoolcache/go       go
+        clean_unless /opt/hostedtoolcache/node     node
+        clean_unless /opt/hostedtoolcache/Python   python
+        clean_unless /opt/hostedtoolcache/PyPy     python
+        clean_unless /opt/hostedtoolcache/Ruby     ruby
+
+        echo "=== Disk after cleanup ==="
+        df -h /
