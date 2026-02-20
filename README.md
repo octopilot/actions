@@ -1,5 +1,7 @@
 # octopilot/actions
 
+[![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](https://opensource.org/licenses/Apache-2.0)
+
 Official GitHub Actions for the Octopilot ecosystem. This monorepo contains a suite of actions designed to automate GitOps workflows, secret management, and Kubernetes operations.
 
 ## Actions

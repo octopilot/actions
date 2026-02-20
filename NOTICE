@@ -1,0 +1,18 @@
+Octopilot GitHub Actions
+Copyright 2024 Octopilot (https://octopilot.app)
+
+This product includes software developed by Octopilot.
+
+These GitHub Actions were designed and built by the Octopilot team to
+solve real DevOps pain: composable, language-aware CI/CD pipeline
+building blocks for teams that want a golden path without the bottleneck.
+
+If you use or redistribute this software, this NOTICE file must be
+included in full in any distribution, documentation, or derived work
+(Apache License 2.0, Section 4(d)).
+
+For support, documentation, and the full actions reference, visit:
+  https://octopilot.app/docs/github-actions
+
+Source code:
+  https://github.com/octopilot/actions
