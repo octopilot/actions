@@ -1,0 +1,148 @@
+name: 'Verify Registry TLS'
+description: >
+  Waits for the octopilot registry-tls container to become ready, configures
+  the Docker daemon to trust it, and optionally validates push/pull.
+
+  The registry-tls image serves HTTPS with a self-signed certificate on its
+  internal port 5000, exposed as host port 5001 (the default). The Docker
+  daemon must be configured to allow the self-signed certificate before any
+  push or pull will succeed.
+
+  Use this action in any job that declares the registry as a GitHub Actions
+  service container:
+
+    services:
+      registry:
+        image: ghcr.io/octopilot/registry-tls:latest
+        ports:
+          - 5001:5000
+
+inputs:
+  port:
+    description: 'Host port the registry is exposed on (must match the service ports mapping).'
+    required: false
+    default: '5001'
+  max_attempts:
+    description: 'Number of health-check retries before failing.'
+    required: false
+    default: '15'
+  retry_delay:
+    description: 'Seconds to wait between health-check attempts.'
+    required: false
+    default: '2'
+  test_push:
+    description: 'Push a small test image to verify write access.'
+    required: false
+    default: 'true'
+
+outputs:
+  registry_url:
+    description: 'The full registry URL (e.g. localhost:5001).'
+    value: ${{ steps.info.outputs.registry_url }}
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Configure Docker daemon to trust registry-tls (self-signed TLS)
+      shell: bash
+      run: |
+        REGISTRY_URL="localhost:${{ inputs.port }}"
+        echo "🔧 Configuring Docker daemon to trust ${REGISTRY_URL} (self-signed TLS)..."
+
+        # Write insecure-registries config — required for self-signed certificates.
+        # registry-tls serves real HTTPS (not plain HTTP), so Docker must be told
+        # to skip TLS verification rather than treating it as a plain HTTP registry.
+        sudo tee /etc/docker/daemon.json > /dev/null <<EOF
+        {
+          "insecure-registries": ["${REGISTRY_URL}"]
+        }
+        EOF
+
+        # Restart Docker to pick up the new daemon config
+        sudo systemctl restart docker
+
+        # Wait for Docker daemon to be responsive after restart
+        for i in $(seq 1 10); do
+          if docker info > /dev/null 2>&1; then
+            echo "✅ Docker daemon ready"
+            break
+          fi
+          if [ "$i" -eq 10 ]; then
+            echo "❌ Docker daemon did not recover after restart"
+            exit 1
+          fi
+          echo "  Waiting for Docker daemon... (${i}/10)"
+          sleep 2
+        done
+
+    - name: Wait for registry to be ready
+      id: wait
+      shell: bash
+      run: |
+        REGISTRY_URL="localhost:${{ inputs.port }}"
+        MAX="${{ inputs.max_attempts }}"
+        DELAY="${{ inputs.retry_delay }}"
+
+        echo "⏳ Waiting for registry at https://${REGISTRY_URL}/v2/ ..."
+
+        for i in $(seq 1 "${MAX}"); do
+          # -k: allow self-signed cert   -s: silent   -f: fail on HTTP errors
+          if curl -k -f -s "https://${REGISTRY_URL}/v2/" > /dev/null 2>&1; then
+            echo "✅ Registry is ready (attempt ${i}/${MAX})"
+            break
+          fi
+
+          if [ "$i" -eq "${MAX}" ]; then
+            echo "❌ Registry not ready after ${MAX} attempts (${MAX}x${DELAY}s)"
+            echo ""
+            echo "Registered service containers:"
+            docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Ports}}\t{{.Status}}"
+            echo ""
+            echo "curl verbose output:"
+            curl -k -v "https://${REGISTRY_URL}/v2/" 2>&1 || true
+            exit 1
+          fi
+
+          echo "  Registry not yet ready, waiting ${DELAY}s... (${i}/${MAX})"
+          sleep "${DELAY}"
+        done
+
+    - name: Export registry URL
+      id: info
+      shell: bash
+      run: |
+        echo "registry_url=localhost:${{ inputs.port }}" >> "$GITHUB_OUTPUT"
+
+    - name: Test registry push/pull
+      if: inputs.test_push == 'true'
+      shell: bash
+      run: |
+        REGISTRY_URL="localhost:${{ inputs.port }}"
+        TEST_IMAGE="${REGISTRY_URL}/octopilot-registry-health:ci"
+
+        echo "🧪 Testing registry push/pull with ${TEST_IMAGE}..."
+
+        # Use a minimal image that is likely already cached on the runner
+        docker pull hello-world:latest > /dev/null 2>&1 || true
+        docker tag hello-world:latest "${TEST_IMAGE}"
+
+        if docker push "${TEST_IMAGE}" > /dev/null 2>&1; then
+          echo "✅ Push test passed"
+        else
+          echo "❌ Push test failed"
+          echo ""
+          echo "Attempting push with verbose output:"
+          docker push "${TEST_IMAGE}" || true
+          exit 1
+        fi
+
+        if docker pull "${TEST_IMAGE}" > /dev/null 2>&1; then
+          echo "✅ Pull test passed"
+        else
+          echo "⚠️  Pull test failed (push succeeded — registry is writable)"
+        fi
+
+        # Clean up test image from registry (best effort)
+        docker rmi "${TEST_IMAGE}" > /dev/null 2>&1 || true
+
+        echo "✅ Registry is healthy and accepting push/pull"
