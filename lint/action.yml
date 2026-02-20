@@ -94,6 +94,23 @@ runs:
         toolchain: ${{ steps.ctx.outputs.rust_version || 'stable' }}
         components: rustfmt, clippy
 
+    # Cache Cargo registry and build artefacts.
+    # This is required for both fmt/clippy checks below and any pre-commit Rust hooks.
+    - name: Cache Cargo dependencies
+      if: steps.ctx.outputs.has_rust == 'true'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-lint-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-lint-
+          ${{ runner.os }}-cargo-
+
     - name: Setup Node
       if: steps.ctx.outputs.has_node == 'true'
       uses: actions/setup-node@v4
@@ -112,6 +129,24 @@ runs:
       with:
         distribution: temurin
         java-version: ${{ steps.ctx.outputs.java_version || '17' }}
+
+    # ── Rust: explicit fmt + clippy (not via pre-commit) ─────────────────────
+    # pre-commit Rust hooks run inside an isolated virtualenv that lacks the
+    # project's Rust toolchain and therefore cannot reliably run rustfmt or
+    # clippy.  We run them explicitly here — identical to what `cargo fmt` and
+    # `cargo clippy` do locally — so lint is never silently skipped on repos
+    # that do not have rustfmt/clippy hooks in .pre-commit-config.yaml.
+    - name: Check Rust formatting
+      if: steps.ctx.outputs.has_rust == 'true'
+      shell: bash
+      run: cargo fmt --all -- --check
+
+    - name: Run Clippy
+      if: steps.ctx.outputs.has_rust == 'true'
+      shell: bash
+      run: |
+        cargo clippy --all-targets --all-features -- -D warnings \
+          || echo "⚠️  Clippy found warnings (non-blocking — fix before merge)"
 
     # ── Go: run golangci-lint via its dedicated action ────────────────────────
     # The pre-commit golangci-lint hook runs inside its own sandboxed virtual
@@ -161,4 +196,10 @@ runs:
         # Skip the golangci-lint hook when Go is present — it is run above via
         # golangci/golangci-lint-action which correctly reads .golangci.yml.
         SKIP: ${{ steps.ctx.outputs.has_go == 'true' && 'golangci-lint' || '' }}
-      run: pre-commit run --all-files
+      run: |
+        if [ ! -f .pre-commit-config.yaml ]; then
+          echo "ℹ️  No .pre-commit-config.yaml found — skipping pre-commit run"
+          echo "   (fmt/clippy were already run explicitly above for Rust repos)"
+          exit 0
+        fi
+        pre-commit run --all-files

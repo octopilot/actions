@@ -45,6 +45,23 @@ runs:
       with:
         toolchain: ${{ steps.ctx.outputs.version || 'stable' }}
 
+    # Cache Cargo registry and build artefacts for Rust projects.
+    # Placed immediately after toolchain setup so it is warm for the test run.
+    - name: Cache Cargo dependencies
+      if: steps.ctx.outputs.language == 'rust'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          target/
+        key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-cargo-test-
+          ${{ runner.os }}-cargo-
+
     - name: Setup Python
       if: steps.ctx.outputs.language == 'python'
       uses: actions/setup-python@v5
@@ -69,7 +86,10 @@ runs:
       if: steps.ctx.outputs.language == 'rust'
       shell: bash
       working-directory: ${{ steps.ctx.outputs.context }}
-      run: ${{ steps.ctx.outputs.command || 'cargo test' }}
+      # Default runs the full workspace with all features and continues past the
+      # first failing test so all failures are surfaced in one run.
+      # Override by setting a `command` field in the skaffold.yaml matrix item.
+      run: ${{ steps.ctx.outputs.command || 'cargo test --workspace --all-features --no-fail-fast' }}
 
     - name: Run Tests (Python)
       if: steps.ctx.outputs.language == 'python'
