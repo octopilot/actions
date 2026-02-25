@@ -1,0 +1,56 @@
+name: 'Paketo build and push to ttl.sh'
+description: >
+  Builds an image with pack (Cloud Native Buildpacks), tags it as
+  ttl.sh/<ttl-uuid>-<suffix>:<tag>, and pushes to ttl.sh. Requires pack CLI
+  to be installed (e.g. buildpacks/github-actions/setup-pack). Use for
+  ephemeral integration images.
+inputs:
+  ttl-uuid:
+    description: >
+      UUID/name segment for ttl.sh (e.g. from uuidgen). Image will be
+      ttl.sh/<ttl-uuid>-<suffix>:<tag>.
+    required: true
+  suffix:
+    description: >
+      Image name suffix (e.g. cronjob). Full image is ttl.sh/<ttl-uuid>-<suffix>:<tag>.
+    required: false
+    default: cronjob
+  tag:
+    description: Tag for the image (e.g. 1h for ttl.sh TTL).
+    required: false
+    default: "1h"
+  path:
+    description: >
+      Path to the application source (e.g. tests/integration/cronjob-app).
+    required: true
+  builder:
+    description: Pack builder image (e.g. paketobuildpacks/builder-jammy-base).
+    required: false
+    default: paketobuildpacks/builder-jammy-base
+  build-env:
+    description: >
+      Optional env var for the build (e.g. BP_JVM_VERSION=17). Omit or leave
+      empty if not needed.
+    required: false
+    default: ""
+
+outputs:
+  image:
+    description: Full image reference (e.g. ttl.sh/<uuid>-<suffix>:<tag>).
+
+runs:
+  using: "composite"
+  steps:
+    - name: Build and push image to ttl.sh
+      shell: bash
+      run: |
+        set -e
+        IMAGE="ttl.sh/${{ inputs['ttl-uuid'] }}-${{ inputs['suffix'] }}:${{ inputs['tag'] }}"
+        ENV_ARG=""
+        [ -n "${{ inputs['build-env'] }}" ] && ENV_ARG="--env ${{ inputs['build-env'] }}"
+        pack build "$IMAGE" \
+          --builder "${{ inputs['builder'] }}" \
+          --path "${{ inputs['path'] }}" \
+          $ENV_ARG
+        docker push "$IMAGE"
+        echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
