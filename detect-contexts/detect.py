@@ -76,20 +76,39 @@ def detect_python_version(context: str) -> str:
 
 
 def detect_java_version(context: str) -> str:
-    # Check pom.xml or build.gradle
+    # Maven: pom.xml
     content = get_file_content(context, "pom.xml")
     if content:
-        # Simple regex for parsing xml
-        match = re.search(r"<java.version>(.*?)</java.version>", content)
+        match = re.search(r"<java\.version>(.*?)</java\.version>", content)
+        if match:
+            return match.group(1).strip()
+        match = re.search(r"<maven\.compiler\.source>(.*?)</maven\.compiler\.source>", content)
+        if match:
+            return match.group(1).strip()
+        match = re.search(r"<maven\.compiler\.(?:source|target)>(.*?)</maven\.compiler\.(?:source|target)>", content)
+        if match:
+            return match.group(1).strip()
+
+    # Gradle (Groovy): build.gradle
+    content = get_file_content(context, "build.gradle")
+    if content:
+        match = re.search(r"sourceCompatibility\s*=\s*['\"]?(?:JavaVersion\.)?VERSION_(\d+)['\"]?", content)
         if match:
             return match.group(1)
-        match = re.search(r"<maven.compiler.source>(.*?)</maven.compiler.source>", content)
+        match = re.search(r"sourceCompatibility\s*=\s*['\"](\d+)['\"]", content)
         if match:
             return match.group(1)
 
-    content = get_file_content(context, "build.gradle")
+    # Gradle (Kotlin DSL): build.gradle.kts — JavaLanguageVersion.of(17) or jvmTarget = "17"
+    content = get_file_content(context, "build.gradle.kts")
     if content:
-        match = re.search(r"sourceCompatibility\s*=\s*['\"](.*?)['\"]", content)
+        match = re.search(r"JavaLanguageVersion\.of\((\d+)\)", content)
+        if match:
+            return match.group(1)
+        match = re.search(r"languageVersion\.set\s*\(\s*JavaLanguageVersion\.of\((\d+)\)", content)
+        if match:
+            return match.group(1)
+        match = re.search(r'jvmTarget\s*=\s*["\'](\d+)["\']', content)
         if match:
             return match.group(1)
 

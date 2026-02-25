@@ -74,6 +74,13 @@ runs:
       with:
         node-version: ${{ steps.ctx.outputs.version || '20' }}
 
+    - name: Setup Java
+      if: steps.ctx.outputs.language == 'java'
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: ${{ steps.ctx.outputs.version || '17' }}
+
     - name: Setup Helm
       if: steps.ctx.outputs.language == 'helm'
       shell: bash
@@ -86,6 +93,15 @@ runs:
         curl -sSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz" | tar -xzf - -C /tmp
         sudo mv /tmp/linux-amd64/helm /usr/local/bin/helm
         helm version --short
+
+    - name: Create Kind cluster (Kubernetes 1.34.3)
+      if: steps.ctx.outputs.language == 'helm'
+      uses: helm/kind-action@v1
+      with:
+        version: v0.31.0
+        node_image: kindest/node:v1.34.3
+        cluster_name: helm-test
+        wait: 120s
 
     # ── Test execution ─────────────────────────────────────────────────────────
 
@@ -127,17 +143,46 @@ runs:
         npm ci || npm install
         ${{ steps.ctx.outputs.command || 'npm test' }}
 
+    - name: Run Tests (Java / Kotlin)
+      if: steps.ctx.outputs.language == 'java'
+      shell: bash
+      working-directory: ${{ steps.ctx.outputs.context }}
+      env:
+        CUSTOM_CMD: ${{ steps.ctx.outputs.command }}
+      run: |
+        if [ -n "$CUSTOM_CMD" ]; then
+          eval "$CUSTOM_CMD"
+        elif [ -f pom.xml ]; then
+          mvn test -B -q
+        elif [ -f build.gradle.kts ] || [ -f build.gradle ]; then
+          if [ -f gradlew ]; then
+            ./gradlew test --no-daemon
+          else
+            gradle test --no-daemon
+          fi
+        else
+          echo "No Maven or Gradle build file found"
+          exit 1
+        fi
+
     - name: Run Tests (Helm)
       if: steps.ctx.outputs.language == 'helm'
       shell: bash
       working-directory: ${{ steps.ctx.outputs.context }}
       run: |
         set -e
-        helm dependency build .
         release_name="test"
+        helm dependency build .
+        echo "=== helm template (local render) ==="
         if [ -f values.yaml ]; then
           helm template "$release_name" . -f values.yaml
         else
           helm template "$release_name" .
         fi
-        echo "Helm template succeeded."
+        echo "=== helm install --dry-run=server (validate against Kind) ==="
+        if [ -f values.yaml ]; then
+          helm install "$release_name" . -f values.yaml --dry-run=server
+        else
+          helm install "$release_name" . --dry-run=server
+        fi
+        echo "Helm template and dry-run against Kind succeeded."
