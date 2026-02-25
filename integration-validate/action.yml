@@ -1,0 +1,133 @@
+name: 'Integration Validate'
+description: >
+  Validates the primary build artifact for integration: uses pipeline-context
+  from detect-contexts (skaffold.yaml as source of truth), sets up toolchain,
+  builds release, optionally runs a smoke check, and outputs a UUID for
+  ephemeral artifact naming (e.g. ttl.sh).
+inputs:
+  pipeline-context:
+    description: >
+      Consolidated CI context (JSON) from detect-contexts. Used to pick the
+      primary build context and set up the correct toolchain.
+    required: true
+  validate-context-index:
+    description: >
+      Index into pipeline-context.matrix of the build to validate (default 0).
+      First non-helm build artifact is used if not set.
+    required: false
+    default: '0'
+  smoke-binary-path:
+    description: >
+      Path to the built binary for smoke run (e.g. target/release/myapp).
+      If set together with smoke-expect-pattern, runs the binary and expects
+      non-zero exit and pattern in output.
+    required: false
+    default: ''
+  smoke-expect-pattern:
+    description: >
+      Pattern to grep for in smoke run output (e.g. MONITOR_LABEL_SELECTOR).
+      Requires smoke-binary-path.
+    required: false
+    default: ''
+
+outputs:
+  uuid:
+    description: Generated UUID for ephemeral artifact naming (e.g. ttl.sh).
+    value: ${{ steps.ttl.outputs.uuid }}
+
+runs:
+  using: "composite"
+  steps:
+    # ── Pick primary build context from pipeline-context (first non-helm) ─────
+    - name: Resolve validate context
+      id: resolve
+      shell: bash
+      env:
+        PIPELINE_CONTEXT: ${{ inputs['pipeline-context'] }}
+        INDEX: ${{ inputs['validate-context-index'] }}
+      run: |
+        # Get first non-helm matrix item (or at INDEX)
+        CTX="$(echo "$PIPELINE_CONTEXT" | jq -c --argjson idx "$INDEX" '
+          [.matrix[] | select(.language != "helm")] | .[$idx] // empty
+        ')"
+        if [ -z "$CTX" ] || [ "$CTX" = "null" ]; then
+          echo "::error::No build context found in pipeline-context.matrix (index $INDEX, non-helm)"
+          exit 1
+        fi
+        echo "context=${CTX}" >> "$GITHUB_OUTPUT"
+        echo "language=$(echo "$CTX" | jq -r '.language')" >> "$GITHUB_OUTPUT"
+        echo "version=$(echo "$CTX" | jq -r '.version // ""')" >> "$GITHUB_OUTPUT"
+        echo "ctx_context=$(echo "$CTX" | jq -r '.context // "."')" >> "$GITHUB_OUTPUT"
+
+    # ── Toolchain setup (same pattern as test action) ───────────────────────────
+    - name: Setup Rust
+      if: steps.resolve.outputs.language == 'rust'
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ steps.resolve.outputs.version || 'stable' }}
+
+    - name: Cache Cargo and rustup
+      if: steps.resolve.outputs.language == 'rust'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          ~/.rustup/
+          target/
+        key: ${{ runner.os }}-rust-${{ steps.resolve.outputs.version || 'stable' }}-cargo-validate-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-rust-${{ steps.resolve.outputs.version || 'stable' }}-cargo-validate-
+          ${{ runner.os }}-cargo-
+
+    - name: Install mold linker (Rust, Linux)
+      if: steps.resolve.outputs.language == 'rust' && runner.os == 'Linux'
+      shell: bash
+      run: sudo apt-get update -qq && sudo apt-get install -y mold
+
+    - name: Build release (Rust)
+      if: steps.resolve.outputs.language == 'rust'
+      shell: bash
+      working-directory: ${{ steps.resolve.outputs.ctx_context }}
+      env:
+        CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        CARGO_BUILD_INCREMENTAL: true
+        RUSTFLAGS: ${{ runner.os == 'Linux' && '-C link-arg=-fuse-ld=mold' || '' }}
+      run: cargo build --release
+
+    - name: Setup Go
+      if: steps.resolve.outputs.language == 'go'
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ steps.resolve.outputs.version || '1.24' }}
+
+    - name: Build release (Go)
+      if: steps.resolve.outputs.language == 'go'
+      shell: bash
+      working-directory: ${{ steps.resolve.outputs.ctx_context }}
+      run: |
+        mkdir -p "$GITHUB_WORKSPACE/bin"
+        go build -o "$GITHUB_WORKSPACE/bin/app" .
+
+    # ── Optional smoke run ────────────────────────────────────────────────────
+    - name: Smoke run
+      if: inputs.smoke-binary-path != '' && inputs.smoke-expect-pattern != ''
+      shell: bash
+      run: |
+        set +e
+        "${{ inputs.smoke-binary-path }}" 2>&1 | tee /tmp/smoke-out
+        code=${PIPESTATUS[0]}
+        if [ "$code" -eq 0 ]; then echo "Expected binary to exit non-zero"; exit 1; fi
+        grep -q "${{ inputs.smoke-expect-pattern }}" /tmp/smoke-out || {
+          echo "Expected output to contain: ${{ inputs.smoke-expect-pattern }}"; exit 1;
+        }
+
+    # ── Generate UUID for ephemeral artifacts ──────────────────────────────────
+    - name: Generate ttl.sh UUID
+      id: ttl
+      shell: bash
+      run: |
+        TTL_UUID="$(uuidgen | tr -d '-' | tr '[:upper:]' '[:lower:]')"
+        echo "uuid=${TTL_UUID}" >> "$GITHUB_OUTPUT"
