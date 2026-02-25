@@ -49,9 +49,9 @@ runs:
       with:
         toolchain: ${{ steps.ctx.outputs.version || 'stable' }}
 
-    # Cache Cargo registry and build artefacts for Rust projects.
-    # Placed immediately after toolchain setup so it is warm for the test run.
-    - name: Cache Cargo dependencies
+    # Cache Cargo registry, rustup toolchains/components, and build artefacts for Rust.
+    # Includes ~/.rustup/ so llvm-tools-preview and toolchain are reused across runs.
+    - name: Cache Cargo and rustup
       if: steps.ctx.outputs.language == 'rust'
       uses: actions/cache@v4
       with:
@@ -60,9 +60,11 @@ runs:
           ~/.cargo/registry/index/
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
+          ~/.rustup/
           target/
-        key: ${{ runner.os }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
+          ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-test-
           ${{ runner.os }}-cargo-test-
           ${{ runner.os }}-cargo-
 
