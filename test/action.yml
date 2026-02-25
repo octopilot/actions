@@ -30,6 +30,10 @@ runs:
         echo "version=$(echo "$PIPELINE_CONTEXT"   | jq -r '.version  // ""')"   >> "$GITHUB_OUTPUT"
         echo "context=$(echo "$PIPELINE_CONTEXT"   | jq -r '.context  // "."')"  >> "$GITHUB_OUTPUT"
         echo "command=$(echo "$PIPELINE_CONTEXT"   | jq -r '.command  // ""')"   >> "$GITHUB_OUTPUT"
+        NAME="$(echo "$PIPELINE_CONTEXT" | jq -r '.name // .context // "unknown"')"
+        echo "name=$NAME" >> "$GITHUB_OUTPUT"
+        SLUG="$(echo "$NAME" | sed 's/[^A-Za-z0-9._-]/-/g' | sed 's/^-*//;s/-*$//' | head -c 50)"
+        echo "name_slug=${SLUG:-unknown}" >> "$GITHUB_OUTPUT"
 
     # ── Toolchain setup (one branch executes per matrix item) ─────────────────
 
@@ -105,60 +109,94 @@ runs:
 
     # ── Test execution ─────────────────────────────────────────────────────────
 
-    - name: Run Tests (Go)
+    - name: Run Tests (Go) with coverage
       if: steps.ctx.outputs.language == 'go'
       shell: bash
       working-directory: ${{ steps.ctx.outputs.context }}
-      run: ${{ steps.ctx.outputs.command || 'go test -v ./...' }}
+      run: |
+        mkdir -p "$GITHUB_WORKSPACE/coverage"
+        if [ -n "${{ steps.ctx.outputs.command }}" ]; then
+          ${{ steps.ctx.outputs.command }}
+        else
+          go test -v -coverprofile="$GITHUB_WORKSPACE/coverage/coverage.out" -covermode=atomic ./...
+        fi
 
-    - name: Run Tests (Rust)
+    - name: Install cargo-llvm-cov (Rust coverage)
+      if: steps.ctx.outputs.language == 'rust'
+      shell: bash
+      run: |
+        rustup component add llvm-tools-preview
+        cargo install cargo-llvm-cov --locked 2>/dev/null || cargo install cargo-llvm-cov
+
+    - name: Run Tests (Rust) with LLVM coverage
       if: steps.ctx.outputs.language == 'rust'
       shell: bash
       working-directory: ${{ steps.ctx.outputs.context }}
-      # Default runs the full workspace with all features and continues past the
-      # first failing test so all failures are surfaced in one run.
-      # Override by setting a `command` field in the skaffold.yaml matrix item.
-      run: ${{ steps.ctx.outputs.command || 'cargo test --workspace --all-features --no-fail-fast' }}
+      run: |
+        mkdir -p "$GITHUB_WORKSPACE/coverage"
+        if [ -n "${{ steps.ctx.outputs.command }}" ]; then
+          ${{ steps.ctx.outputs.command }}
+        else
+          cargo llvm-cov test --workspace --all-features --no-fail-fast \
+            --lcov --output-path "$GITHUB_WORKSPACE/coverage/lcov.info"
+        fi
 
-    - name: Run Tests (Python)
+    - name: Run Tests (Python) with coverage
       if: steps.ctx.outputs.language == 'python'
       shell: bash
       working-directory: ${{ steps.ctx.outputs.context }}
       run: |
-        # pyproject.toml-based projects (PEP 517/518): install with dev extras first.
-        # requirements.txt-based projects: install that instead.
-        # Both patterns are tried so the action works for all Python project layouts.
         if [ -f pyproject.toml ]; then
           pip install -e ".[dev]" 2>/dev/null || pip install -e . 2>/dev/null || true
         elif [ -f requirements.txt ]; then
           pip install -r requirements.txt
         fi
-        ${{ steps.ctx.outputs.command || 'pytest' }}
+        pip install pytest-cov coverage
+        mkdir -p "$GITHUB_WORKSPACE/coverage"
+        if [ -n "${{ steps.ctx.outputs.command }}" ]; then
+          ${{ steps.ctx.outputs.command }}
+        else
+          pytest --cov=. --cov-report=xml:$GITHUB_WORKSPACE/coverage/coverage.xml --cov-report=lcov:$GITHUB_WORKSPACE/coverage/lcov.info -q
+        fi
 
-    - name: Run Tests (Node)
+    - name: Run Tests (Node) with coverage
       if: steps.ctx.outputs.language == 'node'
       shell: bash
       working-directory: ${{ steps.ctx.outputs.context }}
       run: |
         npm ci || npm install
-        ${{ steps.ctx.outputs.command || 'npm test' }}
+        mkdir -p "$GITHUB_WORKSPACE/coverage"
+        if [ -n "${{ steps.ctx.outputs.command }}" ]; then
+          ${{ steps.ctx.outputs.command }}
+        else
+          npx c8 --reporter=lcov --reporter=text --output-dir="$GITHUB_WORKSPACE/coverage" npm test 2>/dev/null || \
+          npx nyc --reporter=lcov --reporter=text --report-dir="$GITHUB_WORKSPACE/coverage" npm test 2>/dev/null || \
+          npm test
+        fi
 
-    - name: Run Tests (Java / Kotlin)
+    - name: Run Tests (Java / Kotlin) with coverage
       if: steps.ctx.outputs.language == 'java'
       shell: bash
       working-directory: ${{ steps.ctx.outputs.context }}
       env:
         CUSTOM_CMD: ${{ steps.ctx.outputs.command }}
       run: |
+        mkdir -p "$GITHUB_WORKSPACE/coverage"
         if [ -n "$CUSTOM_CMD" ]; then
           eval "$CUSTOM_CMD"
         elif [ -f pom.xml ]; then
           mvn test -B -q
+          if [ -d target/site/jacoco ]; then
+            cp -r target/site/jacoco/* "$GITHUB_WORKSPACE/coverage/" 2>/dev/null || true
+          fi
         elif [ -f build.gradle.kts ] || [ -f build.gradle ]; then
           if [ -f gradlew ]; then
-            ./gradlew test --no-daemon
+            ./gradlew test jacocoTestReport --no-daemon 2>/dev/null || ./gradlew test --no-daemon
           else
-            gradle test --no-daemon
+            gradle test jacocoTestReport --no-daemon 2>/dev/null || gradle test --no-daemon
+          fi
+          if [ -d build/reports/jacoco ]; then
+            cp -r build/reports/jacoco/* "$GITHUB_WORKSPACE/coverage/" 2>/dev/null || true
           fi
         else
           echo "No Maven or Gradle build file found"
@@ -186,3 +224,12 @@ runs:
           helm install "$release_name" . --dry-run=server
         fi
         echo "Helm template and dry-run against Kind succeeded."
+
+    # ── Upload coverage report (when produced) ─────────────────────────────────
+    - name: Upload coverage report
+      if: success() && (steps.ctx.outputs.language == 'rust' || steps.ctx.outputs.language == 'go' || steps.ctx.outputs.language == 'python' || steps.ctx.outputs.language == 'node' || steps.ctx.outputs.language == 'java')
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-${{ steps.ctx.outputs.name_slug }}
+        path: coverage
+        if-no-files-found: ignore
