@@ -73,11 +73,13 @@ runs:
         echo "has_node=$(has node)"       >> "$GITHUB_OUTPUT"
         echo "has_python=$(has python)"   >> "$GITHUB_OUTPUT"
         echo "has_java=$(has java)"       >> "$GITHUB_OUTPUT"
+        echo "has_helm=$(has helm)"       >> "$GITHUB_OUTPUT"
         echo "go_version=$(ver go)"       >> "$GITHUB_OUTPUT"
         echo "rust_version=$(ver rust)"   >> "$GITHUB_OUTPUT"
         echo "node_version=$(ver node)"   >> "$GITHUB_OUTPUT"
         echo "python_version=$(ver python)" >> "$GITHUB_OUTPUT"
         echo "java_version=$(ver java)"   >> "$GITHUB_OUTPUT"
+        echo "helm_version=$(ver helm)"   >> "$GITHUB_OUTPUT"
 
     # ── Language toolchain setup (conditional on detected languages) ──────────
 
@@ -176,11 +178,11 @@ runs:
         args: --timeout=${{ inputs['golangci-lint-timeout'] }}
 
 
-    # ── Helm: install and lint any chart directories ──────────────────────────
+    # ── Helm: install and lint chart directories (when detect-contexts found charts) ─
     # Standard YAML checks (e.g. check-yaml) fail on Helm templates ({{ .Values }}).
     # Repos should exclude chart/templates from check-yaml and run helm lint instead.
-    # We install Helm here so pre-commit hooks or explicit steps can run helm lint.
     - name: Setup Helm
+      if: steps.ctx.outputs.has_helm == 'true'
       shell: bash
       run: |
         if command -v helm &>/dev/null; then
@@ -194,16 +196,22 @@ runs:
         helm version --short
 
     - name: Lint Helm charts
+      if: steps.ctx.outputs.has_helm == 'true'
       shell: bash
+      env:
+        PIPELINE_CONTEXT: ${{ inputs['pipeline-context'] }}
       run: |
         set -e
-        charts="$(find . -name 'Chart.yaml' -not -path './.git/*' -not -path './.*' 2>/dev/null)" || true
-        if [ -z "$charts" ]; then
-          echo "No Chart.yaml found, skipping helm lint"
+        chart_paths="$(echo "$PIPELINE_CONTEXT" | jq -r '.chart_paths[]?' 2>/dev/null)" || true
+        if [ -z "$chart_paths" ]; then
+          charts="$(find . -name 'Chart.yaml' -not -path './.git/*' -not -path './.*' 2>/dev/null)" || true
+          chart_paths="$(echo "$charts" | xargs -I{} dirname {} 2>/dev/null)" || true
+        fi
+        if [ -z "$chart_paths" ]; then
+          echo "No chart paths to lint"
           exit 0
         fi
-        echo "$charts" | while read -r chart_file; do
-          dir="$(dirname "$chart_file")"
+        for dir in $chart_paths; do
           echo "Building dependencies and linting chart: $dir"
           (cd "$dir" && helm dependency build . 2>/dev/null || true)
           helm lint "$dir"

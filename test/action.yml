@@ -74,6 +74,19 @@ runs:
       with:
         node-version: ${{ steps.ctx.outputs.version || '20' }}
 
+    - name: Setup Helm
+      if: steps.ctx.outputs.language == 'helm'
+      shell: bash
+      run: |
+        if command -v helm &>/dev/null; then
+          echo "Helm already installed: $(helm version --short)"
+          exit 0
+        fi
+        HELM_VERSION="${HELM_VERSION:-3.16.4}"
+        curl -sSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz" | tar -xzf - -C /tmp
+        sudo mv /tmp/linux-amd64/helm /usr/local/bin/helm
+        helm version --short
+
     # ── Test execution ─────────────────────────────────────────────────────────
 
     - name: Run Tests (Go)
@@ -113,3 +126,18 @@ runs:
       run: |
         npm ci || npm install
         ${{ steps.ctx.outputs.command || 'npm test' }}
+
+    - name: Run Tests (Helm)
+      if: steps.ctx.outputs.language == 'helm'
+      shell: bash
+      working-directory: ${{ steps.ctx.outputs.context }}
+      run: |
+        set -e
+        helm dependency build .
+        release_name="test"
+        if [ -f values.yaml ]; then
+          helm template "$release_name" . -f values.yaml
+        else
+          helm template "$release_name" .
+        fi
+        echo "Helm template succeeded."

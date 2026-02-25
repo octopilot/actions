@@ -96,6 +96,19 @@ def detect_java_version(context: str) -> str:
     return ""
 
 
+def detect_helm_charts(repo_root: str) -> list[str]:
+    """Find all directories that contain a Chart.yaml (Helm chart)."""
+    chart_paths: list[str] = []
+    for dirpath, _dirnames, filenames in os.walk(repo_root):
+        if "Chart.yaml" in filenames:
+            rel = os.path.relpath(dirpath, repo_root)
+            if not rel.startswith(".git"):
+                chart_paths.append(rel if rel != "." else ".")
+        # Skip .git and other hidden dirs to avoid unnecessary walk
+        _dirnames[:] = [d for d in _dirnames if not d.startswith(".")]
+    return sorted(chart_paths)
+
+
 def detect_project_info(context_path: str) -> dict[str, str | None] | None:
     """Detects language and version based on files in the context directory."""
     if not os.path.exists(context_path):
@@ -168,6 +181,13 @@ def main():
         else:
             sys.stderr.write(f"Could not detect language for {image} in {context}\n")
 
+    # Add one matrix entry per Helm chart so the test job runs helm template per chart
+    repo_root = os.path.dirname(os.path.abspath(skaffold_file))
+    chart_paths = detect_helm_charts(repo_root)
+    for path in chart_paths:
+        name = f"helm-{path}" if path != "." else "helm"
+        matrix_include.append({"name": name, "context": path, "language": "helm", "version": ""})
+
     # Output JSON for GitHub Actions Matrix
     json_output = json.dumps(matrix_include)
 
@@ -179,6 +199,12 @@ def main():
         if isinstance(lang, str) and lang:
             unique_langs_set.add(lang)
 
+    # Ensure helm is in unique_langs when we have charts (chart_paths already set above)
+    if chart_paths:
+        unique_langs_set.add("helm")
+        for path in chart_paths:
+            sys.stderr.write(f"Detected Helm chart: {path}\n")
+
     unique_langs = sorted(unique_langs_set)
     langs_output = ",".join(unique_langs)
 
@@ -186,6 +212,9 @@ def main():
     # We pick the "latest" version string found for each language as a heuristic
     versions = {}
     for lang in unique_langs:
+        if lang == "helm":
+            versions[lang] = ""  # No single version; charts are linted via helm lint
+            continue
         # Collect all versions for this language
         langs_versions = {item["version"] for item in matrix_include if item["language"] == lang and item["version"]}
         if langs_versions:
@@ -195,7 +224,12 @@ def main():
             versions[lang] = best_version
 
     # Create consolidated pipeline context
-    pipeline_context = {"matrix": matrix_include, "languages": unique_langs, "versions": versions}
+    pipeline_context = {
+        "matrix": matrix_include,
+        "languages": unique_langs,
+        "versions": versions,
+        "chart_paths": chart_paths,
+    }
 
     # Also add individual version keys for convenience if needed,
     # but the primary goal is to pass `pipeline_context` as a single object.

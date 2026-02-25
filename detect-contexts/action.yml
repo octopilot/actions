@@ -27,8 +27,11 @@ outputs:
   java-version:
     description: "Detected Java version (if any)"
     value: ${{ steps.detect.outputs.java-version }}
+  helm-version:
+    description: "Set when repo has Helm charts (empty; use chart_paths in pipeline-context for paths)"
+    value: ${{ steps.detect.outputs.helm-version }}
   pipeline-context:
-    description: "Consolidated CI context object (JSON)"
+    description: "Consolidated CI context object (JSON). Includes matrix, languages, versions, and chart_paths (list of Helm chart dirs) when present."
     value: ${{ steps.detect.outputs.pipeline-context }}
 runs:
   using: "composite"
