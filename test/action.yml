@@ -130,7 +130,13 @@ runs:
       shell: bash
       run: |
         rustup component add llvm-tools-preview
-        cargo install cargo-llvm-cov --locked 2>/dev/null || cargo install cargo-llvm-cov
+        cargo install cargo-llvm-cov --locked --force 2>/dev/null || cargo install cargo-llvm-cov --force
+
+    - name: Install mold linker (Rust, Linux)
+      if: steps.ctx.outputs.language == 'rust' && runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update -qq && sudo apt-get install -y mold
 
     - name: Run Tests (Rust) with LLVM coverage
       if: steps.ctx.outputs.language == 'rust'
@@ -138,6 +144,12 @@ runs:
       working-directory: ${{ steps.ctx.outputs.context }}
       env:
         CUSTOM_CMD: ${{ steps.ctx.outputs.command }}
+        # Use workspace target dir so the cached target/ is always reused (same path for any context).
+        CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        # Incremental builds reuse cached artifacts (see https://medium.com/@premchandak_11/one-line-in-cargo-config-toml-made-my-rust-build-35-faster-6c91425a8f0a).
+        CARGO_BUILD_INCREMENTAL: 1
+        # Faster linking on Linux when mold is installed (step above).
+        RUSTFLAGS: ${{ runner.os == 'Linux' && '-C link-arg=-fuse-ld=mold' || '' }}
       run: |
         mkdir -p "$GITHUB_WORKSPACE/coverage"
         if [ -z "$CUSTOM_CMD" ]; then
