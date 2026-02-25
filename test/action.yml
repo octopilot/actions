@@ -153,7 +153,7 @@ runs:
       run: |
         mkdir -p "$GITHUB_WORKSPACE/coverage"
         if [ -z "$CUSTOM_CMD" ]; then
-          cargo llvm-cov test --workspace --all-features --no-fail-fast \
+          cargo llvm-cov test --workspace --all-features --no-fail-fast --no-clean \
             --lcov --output-path "$GITHUB_WORKSPACE/coverage/lcov.info"
         else
           eval "$CUSTOM_CMD"
