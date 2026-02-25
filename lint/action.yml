@@ -176,6 +176,39 @@ runs:
         args: --timeout=${{ inputs['golangci-lint-timeout'] }}
 
 
+    # ── Helm: install and lint any chart directories ──────────────────────────
+    # Standard YAML checks (e.g. check-yaml) fail on Helm templates ({{ .Values }}).
+    # Repos should exclude chart/templates from check-yaml and run helm lint instead.
+    # We install Helm here so pre-commit hooks or explicit steps can run helm lint.
+    - name: Setup Helm
+      shell: bash
+      run: |
+        if command -v helm &>/dev/null; then
+          echo "Helm already installed: $(helm version --short)"
+          exit 0
+        fi
+        HELM_VERSION="${HELM_VERSION:-3.16.4}"
+        echo "Installing Helm ${HELM_VERSION}..."
+        curl -sSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz" | tar -xzf - -C /tmp
+        sudo mv /tmp/linux-amd64/helm /usr/local/bin/helm
+        helm version --short
+
+    - name: Lint Helm charts
+      shell: bash
+      run: |
+        set -e
+        charts="$(find . -name 'Chart.yaml' -not -path './.git/*' -not -path './.*' 2>/dev/null)" || true
+        if [ -z "$charts" ]; then
+          echo "No Chart.yaml found, skipping helm lint"
+          exit 0
+        fi
+        echo "$charts" | while read -r chart_file; do
+          dir="$(dirname "$chart_file")"
+          echo "Building dependencies and linting chart: $dir"
+          (cd "$dir" && helm dependency build . 2>/dev/null || true)
+          helm lint "$dir"
+        done
+
     # ── pre-commit ────────────────────────────────────────────────────────────
 
     - name: Install pre-commit
