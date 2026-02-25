@@ -113,12 +113,14 @@ runs:
       if: steps.ctx.outputs.language == 'go'
       shell: bash
       working-directory: ${{ steps.ctx.outputs.context }}
+      env:
+        CUSTOM_CMD: ${{ steps.ctx.outputs.command }}
       run: |
         mkdir -p "$GITHUB_WORKSPACE/coverage"
-        if [ -z "${{ steps.ctx.outputs.command }}" ]; then
+        if [ -z "$CUSTOM_CMD" ]; then
           go test -v -coverprofile="$GITHUB_WORKSPACE/coverage/coverage.out" -covermode=atomic ./...
         else
-          ${{ steps.ctx.outputs.command }}
+          eval "$CUSTOM_CMD"
         fi
 
     - name: Install cargo-llvm-cov (Rust coverage)
@@ -132,19 +134,23 @@ runs:
       if: steps.ctx.outputs.language == 'rust'
       shell: bash
       working-directory: ${{ steps.ctx.outputs.context }}
+      env:
+        CUSTOM_CMD: ${{ steps.ctx.outputs.command }}
       run: |
         mkdir -p "$GITHUB_WORKSPACE/coverage"
-        if [ -z "${{ steps.ctx.outputs.command }}" ]; then
+        if [ -z "$CUSTOM_CMD" ]; then
           cargo llvm-cov test --workspace --all-features --no-fail-fast \
             --lcov --output-path "$GITHUB_WORKSPACE/coverage/lcov.info"
         else
-          ${{ steps.ctx.outputs.command }}
+          eval "$CUSTOM_CMD"
         fi
 
     - name: Run Tests (Python) with coverage
       if: steps.ctx.outputs.language == 'python'
       shell: bash
       working-directory: ${{ steps.ctx.outputs.context }}
+      env:
+        CUSTOM_CMD: ${{ steps.ctx.outputs.command }}
       run: |
         if [ -f pyproject.toml ]; then
           pip install -e ".[dev]" 2>/dev/null || pip install -e . 2>/dev/null || true
@@ -153,25 +159,27 @@ runs:
         fi
         pip install pytest-cov coverage
         mkdir -p "$GITHUB_WORKSPACE/coverage"
-        if [ -z "${{ steps.ctx.outputs.command }}" ]; then
+        if [ -z "$CUSTOM_CMD" ]; then
           pytest --cov=. --cov-report=xml:$GITHUB_WORKSPACE/coverage/coverage.xml --cov-report=lcov:$GITHUB_WORKSPACE/coverage/lcov.info -q
         else
-          ${{ steps.ctx.outputs.command }}
+          eval "$CUSTOM_CMD"
         fi
 
     - name: Run Tests (Node) with coverage
       if: steps.ctx.outputs.language == 'node'
       shell: bash
       working-directory: ${{ steps.ctx.outputs.context }}
+      env:
+        CUSTOM_CMD: ${{ steps.ctx.outputs.command }}
       run: |
         npm ci || npm install
         mkdir -p "$GITHUB_WORKSPACE/coverage"
-        if [ -z "${{ steps.ctx.outputs.command }}" ]; then
+        if [ -z "$CUSTOM_CMD" ]; then
           npx c8 --reporter=lcov --reporter=text --output-dir="$GITHUB_WORKSPACE/coverage" npm test 2>/dev/null || \
           npx nyc --reporter=lcov --reporter=text --report-dir="$GITHUB_WORKSPACE/coverage" npm test 2>/dev/null || \
           npm test
         else
-          ${{ steps.ctx.outputs.command }}
+          eval "$CUSTOM_CMD"
         fi
 
     - name: Run Tests (Java / Kotlin) with coverage
