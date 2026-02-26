@@ -3,6 +3,8 @@ description: >
   Installs Helm (if needed), runs helm dependency build and helm package,
   pushes the chart to oci://ttl.sh/<ttl-uuid>, and writes chart_ref and
   chart_version to an output file for downstream steps.
+  **Deprecated:** Prefer octopilot/actions/octopilot with ttl-uuid for integration;
+  it builds chart artifacts via the helm buildpack and writes build_result.json.
 inputs:
   ttl-uuid:
     description: >

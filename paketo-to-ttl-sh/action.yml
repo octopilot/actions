@@ -4,6 +4,8 @@ description: >
   ttl.sh/<ttl-uuid>-<suffix>:<tag>, and pushes to ttl.sh. Requires pack CLI
   to be installed (e.g. buildpacks/github-actions/setup-pack). Use for
   ephemeral integration images.
+  **Deprecated:** Prefer octopilot/actions/octopilot with ttl-uuid for integration;
+  it builds from skaffold.yaml and writes build_result.json.
 inputs:
   ttl-uuid:
     description: >

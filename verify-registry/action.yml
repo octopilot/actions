@@ -75,7 +75,7 @@ runs:
           sleep 2
         done
 
-    - name: Wait for registry to be ready
+    - name: Wait for registry service container to be healthy
       id: wait
       shell: bash
       run: |
@@ -83,29 +83,54 @@ runs:
         MAX="${{ inputs.max_attempts }}"
         DELAY="${{ inputs.retry_delay }}"
 
-        echo "⏳ Waiting for registry at https://${REGISTRY_URL}/v2/ ..."
+        # Find the registry service container by ID (GitHub starts it; match by published port or image)
+        CONTAINER_ID=$(docker ps -q --no-trunc --filter "publish=${{ inputs.port }}" | head -1)
+        if [ -z "$CONTAINER_ID" ]; then
+          CONTAINER_ID=$(docker ps -q --no-trunc --filter "ancestor=ghcr.io/octopilot/registry-tls:latest" | head -1)
+        fi
 
-        for i in $(seq 1 "${MAX}"); do
-          # -k: allow self-signed cert   -s: silent   -f: fail on HTTP errors
-          if curl -k -f -s "https://${REGISTRY_URL}/v2/" > /dev/null 2>&1; then
-            echo "✅ Registry is ready (attempt ${i}/${MAX})"
-            break
-          fi
+        if [ -n "$CONTAINER_ID" ]; then
+          echo "⏳ Waiting for registry service container ${CONTAINER_ID:0:12} to be healthy (docker inspect)..."
 
-          if [ "$i" -eq "${MAX}" ]; then
-            echo "❌ Registry not ready after ${MAX} attempts (${MAX}x${DELAY}s)"
-            echo ""
-            echo "Registered service containers:"
-            docker ps --format "table {{.Names}}\t{{.Image}}\t{{.Ports}}\t{{.Status}}"
-            echo ""
-            echo "curl verbose output:"
-            curl -k -v "https://${REGISTRY_URL}/v2/" 2>&1 || true
-            exit 1
-          fi
+          for i in $(seq 1 "${MAX}"); do
+            STATUS=$(docker inspect --format '{{if .Config.Healthcheck}}{{.State.Health.Status}}{{else}}no-healthcheck{{end}}' "${CONTAINER_ID}" 2>/dev/null || true)
+            if [ "$STATUS" = "healthy" ]; then
+              echo "✅ Registry container is healthy (attempt ${i}/${MAX})"
+              break
+            fi
+            if [ "$i" -eq "${MAX}" ]; then
+              echo "⚠️ Container health status: ${STATUS:-unknown}; falling back to curl check"
+              CONTAINER_ID=""
+              break
+            fi
+            echo "  Container status: ${STATUS:-starting}, waiting ${DELAY}s... (${i}/${MAX})"
+            sleep "${DELAY}"
+          done
+        fi
 
-          echo "  Registry not yet ready, waiting ${DELAY}s... (${i}/${MAX})"
-          sleep "${DELAY}"
-        done
+        # Fallback: poll v2/ endpoint (no container ID or image has no HEALTHCHECK)
+        if [ -z "$CONTAINER_ID" ] || [ "$STATUS" != "healthy" ]; then
+          echo "⏳ Waiting for registry at https://${REGISTRY_URL}/v2/ ..."
+
+          for i in $(seq 1 "${MAX}"); do
+            if curl -k -f -s "https://${REGISTRY_URL}/v2/" > /dev/null 2>&1; then
+              echo "✅ Registry is ready (attempt ${i}/${MAX})"
+              break
+            fi
+            if [ "$i" -eq "${MAX}" ]; then
+              echo "❌ Registry not ready after ${MAX} attempts (${MAX}x${DELAY}s)"
+              echo ""
+              echo "Service containers:"
+              docker ps -a --format "table {{.ID}}\t{{.Image}}\t{{.Ports}}\t{{.Status}}"
+              echo ""
+              echo "curl verbose:"
+              curl -k -v "https://${REGISTRY_URL}/v2/" 2>&1 || true
+              exit 1
+            fi
+            echo "  Registry not yet ready, waiting ${DELAY}s... (${i}/${MAX})"
+            sleep "${DELAY}"
+          done
+        fi
 
     - name: Export registry URL
       id: info

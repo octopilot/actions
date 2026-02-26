@@ -2,6 +2,8 @@ name: 'Docker build and push to ttl.sh'
 description: >
   Builds an image with docker build, tags it as ttl.sh/<ttl-uuid>-<suffix>:<tag>,
   and pushes to ttl.sh. Use for ephemeral integration images.
+  **Deprecated:** Prefer octopilot/actions/octopilot with ttl-uuid for integration;
+  it builds from skaffold.yaml and writes build_result.json.
 inputs:
   ttl-uuid:
     description: >

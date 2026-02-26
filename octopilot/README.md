@@ -13,7 +13,9 @@ attestation) can consume.
 
 | Input | Required | Default | Description |
 |-------|----------|---------|-------------|
-| `registry` | **Yes** | — | Target registry and org, e.g. `ghcr.io/octopilot`. |
+| `registry` | No* | — | Target registry and org, e.g. `ghcr.io/octopilot`. *Required unless `ttl-uuid` is set. |
+| `ttl-uuid` | No | — | When set, push to **ttl.sh** as `ttl.sh/<ttl-uuid>-<suffix>:<ttl-tag>` and write `build_result.json`. Use for ephemeral integration (e.g. from `integration-validate`). Overrides `registry`. |
+| `ttl-tag` | No | `1h` | Tag for ttl.sh when `ttl-uuid` is set. |
 | `version` | No | `$GITHUB_REF_NAME` | Version tag applied to pushed images (e.g. `v1.2.3`). |
 | `platforms` | No | `linux/amd64` | Comma-separated platform list, e.g. `linux/amd64,linux/arm64`. |
 | `op_version` | No | `latest` | Version of the `ghcr.io/octopilot/op` container image to use in non-bypass mode. |
@@ -42,6 +44,21 @@ Requires Docker-in-Docker (the host Docker socket is mounted into the container)
     platforms: linux/amd64,linux/arm64
     version: ${{ github.ref_name }}
 ```
+
+### ttl.sh ephemeral (integration)
+
+For short-lived integration builds (e.g. Kind tests), pass a UUID from an earlier step (e.g. `integration-validate`). Images are pushed to `ttl.sh/<uuid>-<suffix>:<tag>` and `build_result.json` is written for the deploy step.
+
+```yaml
+- name: Build and push to ttl.sh
+  uses: octopilot/actions/octopilot@main
+  with:
+    ttl-uuid: ${{ needs.integration-validate.outputs.uuid }}
+    ttl-tag: "1h"
+    # registry not needed
+```
+
+Downstream: use `build_result.json` (e.g. `jq '.builds[] | select(.imageName | endswith("monitor")) | .tag'`) instead of the legacy artifact .txt files.
 
 ### Bypass mode
 

@@ -6,8 +6,17 @@ inputs:
     required: false
     default: ''
   registry:
-    description: 'Target registry (e.g. ghcr.io/octopilot).'
-    required: true
+    description: 'Target registry (e.g. ghcr.io/octopilot). Ignored when ttl-uuid is set (push goes to ttl.sh).'
+    required: false
+    default: ''
+  ttl-uuid:
+    description: 'When set, push to ttl.sh/<ttl-uuid>-<suffix>:<ttl-tag> and write build_result.json (ephemeral integration). Overrides registry.'
+    required: false
+    default: ''
+  ttl-tag:
+    description: 'Tag for ttl.sh when ttl-uuid is set (default 1h).'
+    required: false
+    default: '1h'
   platforms:
     description: 'Comma-separated list of platforms to build for (e.g. linux/amd64).'
     required: false
@@ -41,6 +50,8 @@ runs:
       env:
         INPUT_VERSION: ${{ inputs.version }}
         INPUT_REGISTRY: ${{ inputs.registry }}
+        INPUT_TTL_UUID: ${{ inputs.ttl-uuid }}
+        INPUT_TTL_TAG: ${{ inputs.ttl-tag }}
         INPUT_PLATFORMS: ${{ inputs.platforms }}
         INPUT_OP_VERSION: ${{ inputs.op_version }}
         INPUT_SBOM_OUTPUT: ${{ inputs.sbom_output }}
@@ -56,6 +67,18 @@ runs:
         # Create SBOM output directory
         mkdir -p "${INPUT_SBOM_OUTPUT}"
 
+        # Build args: ttl.sh ephemeral or registry (one required)
+        if [ -n "${INPUT_TTL_UUID}" ]; then
+          OP_REPO_ARG=""
+          OP_EXTRA_ARGS="--ttl-uuid ${INPUT_TTL_UUID} --ttl-tag ${INPUT_TTL_TAG:-1h}"
+        elif [ -n "${INPUT_REGISTRY}" ]; then
+          OP_REPO_ARG="--repo ${INPUT_REGISTRY}"
+          OP_EXTRA_ARGS=""
+        else
+          echo "::error::Set either registry or ttl-uuid."
+          exit 1
+        fi
+
         if [ "${INPUT_BUILD_BYPASS}" == "true" ]; then
             echo "Bypassing container execution. Running op directly..."
             export DOCKER_METADATA_OUTPUT_VERSION="${VERSION}"
@@ -69,7 +92,7 @@ runs:
             chmod +x "${INPUT_OP_BINARY}"
             
             # Run op directly
-            "${INPUT_OP_BINARY}" build --repo "${INPUT_REGISTRY}" --platform "${INPUT_PLATFORMS}" --push --sbom-output "${INPUT_SBOM_OUTPUT}"
+            "${INPUT_OP_BINARY}" build $OP_REPO_ARG $OP_EXTRA_ARGS --platform "${INPUT_PLATFORMS}" --push --sbom-output "${INPUT_SBOM_OUTPUT}"
         else
             # Determine builder image tag
             IMAGE_TAG="${INPUT_OP_VERSION}"
@@ -99,7 +122,7 @@ runs:
                 -e CI="true" \
                 --entrypoint /bin/sh \
                 "$IMAGE" \
-                -c "git config --global --add safe.directory /workspace && op build --repo '${INPUT_REGISTRY}' --platform '${INPUT_PLATFORMS}' --push --sbom-output '${INPUT_SBOM_OUTPUT}'"
+                -c "git config --global --add safe.directory /workspace && op build $OP_REPO_ARG $OP_EXTRA_ARGS --platform '${INPUT_PLATFORMS}' --push --sbom-output '${INPUT_SBOM_OUTPUT}'"
         fi
 
         # Package SBOMs if directory exists and is not empty
