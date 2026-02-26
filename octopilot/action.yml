@@ -21,10 +21,14 @@ inputs:
     description: 'Comma-separated list of platforms to build for (e.g. linux/amd64).'
     required: false
     default: 'linux/amd64'
-  op_version:
-    description: 'Version of octopilot-pipeline-tools to use.'
+  artifact:
+    description: 'Build only this artifact (exact image name from skaffold, e.g. ghcr.io/org/myimage). For matrix/fan-out integration builds.'
     required: false
-    default: 'latest'
+    default: ''
+  op_version:
+    description: 'Version of octopilot-pipeline-tools to use (e.g. v1.0.2).'
+    required: false
+    default: 'v1.0.2'
   sbom_output:
     description: 'Path to output SBOMs.'
     required: false
@@ -39,8 +43,11 @@ inputs:
     default: 'false'
 outputs:
   digest:
-    description: 'Container image digest.'
+    description: 'Container image digest (e.g. sha256:...).'
     value: ${{ steps.build.outputs.digest }}
+  tag:
+    description: 'Full image ref from build_result.json (e.g. ttl.sh/<uuid>-<suffix>:<tag>@sha256:... or registry/image:tag@sha256:...).'
+    value: ${{ steps.build.outputs.tag }}
 runs:
   using: "composite"
   steps:
@@ -53,6 +60,7 @@ runs:
         INPUT_TTL_UUID: ${{ inputs.ttl-uuid }}
         INPUT_TTL_TAG: ${{ inputs.ttl-tag }}
         INPUT_PLATFORMS: ${{ inputs.platforms }}
+        INPUT_ARTIFACT: ${{ inputs.artifact }}
         INPUT_OP_VERSION: ${{ inputs.op_version }}
         INPUT_SBOM_OUTPUT: ${{ inputs.sbom_output }}
         INPUT_OP_BINARY: ${{ inputs.op_binary }}
@@ -67,13 +75,11 @@ runs:
         # Create SBOM output directory
         mkdir -p "${INPUT_SBOM_OUTPUT}"
 
-        # Build args: ttl.sh ephemeral or registry (one required)
+        # Require either ttl-uuid (ephemeral ttl.sh) or registry
         if [ -n "${INPUT_TTL_UUID}" ]; then
-          OP_REPO_ARG=""
-          OP_EXTRA_ARGS="--ttl-uuid ${INPUT_TTL_UUID} --ttl-tag ${INPUT_TTL_TAG:-1h}"
+          echo "Using ttl.sh ephemeral build (op --ttl-uuid / --ttl-tag)."
         elif [ -n "${INPUT_REGISTRY}" ]; then
-          OP_REPO_ARG="--repo ${INPUT_REGISTRY}"
-          OP_EXTRA_ARGS=""
+          echo "Using registry: ${INPUT_REGISTRY}"
         else
           echo "::error::Set either registry or ttl-uuid."
           exit 1
@@ -91,8 +97,13 @@ runs:
             # Ensure op is executable
             chmod +x "${INPUT_OP_BINARY}"
             
-            # Run op directly
-            "${INPUT_OP_BINARY}" build $OP_REPO_ARG $OP_EXTRA_ARGS --platform "${INPUT_PLATFORMS}" --push --sbom-output "${INPUT_SBOM_OUTPUT}"
+            OP_ARTIFACT=""
+            [ -n "${INPUT_ARTIFACT}" ] && OP_ARTIFACT="--artifact ${INPUT_ARTIFACT}"
+            if [ -n "${INPUT_TTL_UUID}" ]; then
+              "${INPUT_OP_BINARY}" build --ttl-uuid "${INPUT_TTL_UUID}" --ttl-tag "${INPUT_TTL_TAG:-1h}" $OP_ARTIFACT --platform "${INPUT_PLATFORMS}" --push --sbom-output "${INPUT_SBOM_OUTPUT}"
+            else
+              "${INPUT_OP_BINARY}" build --repo "${INPUT_REGISTRY}" $OP_ARTIFACT --platform "${INPUT_PLATFORMS}" --push --sbom-output "${INPUT_SBOM_OUTPUT}"
+            fi
         else
             # Determine builder image tag
             IMAGE_TAG="${INPUT_OP_VERSION}"
@@ -103,15 +114,10 @@ runs:
             IMAGE="ghcr.io/octopilot/op:${IMAGE_TAG}"
             echo "Using builder image: $IMAGE"
 
-            # Run op build in container.
-            # Mounts:
-            #   docker socket  — so op/pack can call the host Docker daemon
-            #   workspace      — source code to build
-            #   ~/.docker      — host registry credentials (read-only) so that
-            #                    the Pack ANALYZE phase can authenticate with GHCR
-            #                    to check for existing layers. Without this mount
-            #                    the lifecycle gets DENIED even on a first push
-            #                    because private registry checks require auth.
+            # Pass ttl-uuid/ttl-tag and registry via env so op args are built inside the
+            # container (avoids interpolating user input in the host shell). op supports
+            # --ttl-uuid / --ttl-tag and writes build_result.json with ttl.sh refs.
+            # Mounts: docker socket, workspace, ~/.docker (for registry auth when not using ttl.sh).
             docker run --rm \
                 -v /var/run/docker.sock:/var/run/docker.sock \
                 -v "$GITHUB_WORKSPACE:/workspace" \
@@ -120,9 +126,22 @@ runs:
                 -e DOCKER_METADATA_OUTPUT_VERSION="${VERSION}" \
                 -e GITHUB_ACTIONS="true" \
                 -e CI="true" \
+                -e OP_TTL_UUID="${INPUT_TTL_UUID}" \
+                -e OP_TTL_TAG="${INPUT_TTL_TAG}" \
+                -e OP_REGISTRY="${INPUT_REGISTRY}" \
+                -e OP_ARTIFACT="${INPUT_ARTIFACT}" \
+                -e OP_PLATFORMS="${INPUT_PLATFORMS}" \
+                -e OP_SBOM_OUTPUT="${INPUT_SBOM_OUTPUT}" \
                 --entrypoint /bin/sh \
                 "$IMAGE" \
-                -c "git config --global --add safe.directory /workspace && op build $OP_REPO_ARG $OP_EXTRA_ARGS --platform '${INPUT_PLATFORMS}' --push --sbom-output '${INPUT_SBOM_OUTPUT}'"
+                -c 'git config --global --add safe.directory /workspace && \
+                  if [ -n "$OP_TTL_UUID" ]; then
+                    OP_REPO_ARG=""; OP_EXTRA="--ttl-uuid $OP_TTL_UUID --ttl-tag ${OP_TTL_TAG:-1h}"
+                  else
+                    OP_REPO_ARG="--repo $OP_REGISTRY"; OP_EXTRA=""
+                  fi && \
+                  OP_ARTIFACT_ARG=""; [ -n "$OP_ARTIFACT" ] && OP_ARTIFACT_ARG="--artifact $OP_ARTIFACT" && \
+                  op build $OP_REPO_ARG $OP_EXTRA $OP_ARTIFACT_ARG --platform "$OP_PLATFORMS" --push --sbom-output "$OP_SBOM_OUTPUT"'
         fi
 
         # Package SBOMs if directory exists and is not empty
@@ -130,11 +149,11 @@ runs:
             tar -czvf "${INPUT_SBOM_OUTPUT}.tar.gz" -C "${INPUT_SBOM_OUTPUT}" .
         fi
 
-        # Extract digest from the last build entry (application image).
-        # builds[0] is typically the base image when skaffold.yaml defines
-        # multiple artifacts; the application image is always last by convention.
+        # Extract digest and full tag from build_result.json (last entry = application image).
+        # With ttl-uuid, tag is e.g. ttl.sh/<uuid>-<suffix>:<ttl-tag>@sha256:...
         if [ -f "build_result.json" ]; then
             TAG=$(jq -r '.builds[-1].tag' build_result.json)
             DIGEST=$(echo "$TAG" | awk -F'@' '{print $2}')
             echo "digest=$DIGEST" >> $GITHUB_OUTPUT
+            echo "tag=$TAG" >> $GITHUB_OUTPUT
         fi

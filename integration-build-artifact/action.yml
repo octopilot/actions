@@ -28,31 +28,20 @@ runs:
         echo "context=$(echo "$ARTIFACT" | jq -r '.context // "."')" >> "$GITHUB_OUTPUT"
         echo "suffix=$(echo "$ARTIFACT" | jq -r '.suffix // ""')" >> "$GITHUB_OUTPUT"
         echo "output_key=$(echo "$ARTIFACT" | jq -r '.output_key // ""')" >> "$GITHUB_OUTPUT"
+        echo "image=$(echo "$ARTIFACT" | jq -r '.image // ""')" >> "$GITHUB_OUTPUT"
         echo "path=$(echo "$ARTIFACT" | jq -r '.path // ""')" >> "$GITHUB_OUTPUT"
         echo "dockerfile=$(echo "$ARTIFACT" | jq -r '.dockerfile // "Dockerfile"')" >> "$GITHUB_OUTPUT"
         echo "builder=$(echo "$ARTIFACT" | jq -r '.builder // "paketobuildpacks/builder-jammy-base"')" >> "$GITHUB_OUTPUT"
         echo "build_env=$(echo "$ARTIFACT" | jq -r '.build_env // ""')" >> "$GITHUB_OUTPUT"
 
-    - name: Build and push image (docker)
-      id: docker
-      if: steps.parse.outputs.type == 'image' && steps.parse.outputs.build_method == 'docker'
-      uses: octopilot/actions/docker-to-ttl-sh@main
+    - name: Build and push image (Octopilot)
+      id: build
+      if: steps.parse.outputs.type == 'image'
+      uses: octopilot/actions/octopilot@main
       with:
         ttl-uuid: ${{ inputs.ttl-uuid }}
-        suffix: ${{ steps.parse.outputs.suffix }}
-        context: ${{ steps.parse.outputs.context }}
-        dockerfile: ${{ steps.parse.outputs.dockerfile }}
-
-    - name: Build and push image (pack)
-      id: pack
-      if: steps.parse.outputs.type == 'image' && steps.parse.outputs.build_method == 'pack'
-      uses: octopilot/actions/paketo-to-ttl-sh@main
-      with:
-        ttl-uuid: ${{ inputs.ttl-uuid }}
-        suffix: ${{ steps.parse.outputs.suffix }}
-        path: ${{ steps.parse.outputs.context }}
-        builder: ${{ steps.parse.outputs.builder }}
-        build-env: ${{ steps.parse.outputs.build_env }}
+        ttl-tag: '1h'
+        artifact: ${{ steps.parse.outputs.image }}
 
     - name: Package and push Helm chart
       id: helm
@@ -67,5 +56,4 @@ runs:
       if: steps.parse.outputs.type == 'image'
       shell: bash
       run: |
-        IMAGE="${{ steps.docker.outputs.image }}${{ steps.pack.outputs.image }}"
-        echo "${{ steps.parse.outputs.output_key }}=${IMAGE}" > "${{ inputs.output-path }}"
+        echo "${{ steps.parse.outputs.output_key }}=${{ steps.build.outputs.tag }}" > "${{ inputs.output-path }}"

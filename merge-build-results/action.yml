@@ -1,0 +1,54 @@
+name: 'Merge build_result.json files'
+description: >
+  Finds all build_result.json files under a directory (e.g. after downloading
+  integration-* artifacts) and merges them into a single build_result.json
+  without data loss. Preserves every build entry from every file in order.
+inputs:
+  directory:
+    description: 'Directory to search for build_result.json files (e.g. artifact-outputs).'
+    required: false
+    default: artifact-outputs
+  output-path:
+    description: 'Path for the merged build_result.json.'
+    required: false
+    default: build_result.json
+outputs:
+  path:
+    description: 'Path to the merged build_result.json (empty if no files found).'
+    value: ${{ steps.merge.outputs.path }}
+  count:
+    description: 'Number of build entries in the merged result.'
+    value: ${{ steps.merge.outputs.count }}
+runs:
+  using: "composite"
+  steps:
+    - name: Merge build results
+      id: merge
+      shell: bash
+      run: |
+        set -e
+        DIR="${{ inputs.directory }}"
+        OUT="${{ inputs.output-path }}"
+        if [ ! -d "$DIR" ]; then
+          echo "::warning::Directory $DIR not found; no build_result.json to merge."
+          echo '{"builds":[]}' > "$OUT"
+          echo "path=$OUT" >> "$GITHUB_OUTPUT"
+          echo "count=0" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        # Find all build_result.json (any nesting under directory)
+        FILES=$(find "$DIR" -type f -name 'build_result.json' 2>/dev/null | sort)
+        if [ -z "$FILES" ]; then
+          echo "::warning::No build_result.json found under $DIR."
+          echo '{"builds":[]}' > "$OUT"
+          echo "path=$OUT" >> "$GITHUB_OUTPUT"
+          echo "count=0" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        # Merge: concatenate all .builds[] from each file into one array (no dedupe; preserve order)
+        # shellcheck disable=SC2086
+        jq -s '[.[].builds[]] | {builds: .}' $FILES > "$OUT"
+        COUNT=$(jq -r '.builds | length' "$OUT")
+        echo "Merged ${COUNT} build entries from $(echo "$FILES" | wc -l) file(s)."
+        echo "path=$OUT" >> "$GITHUB_OUTPUT"
+        echo "count=$COUNT" >> "$GITHUB_OUTPUT"

@@ -242,6 +242,7 @@ def build_integration_matrix(artifacts: list[dict], chart_paths: list[str], repo
         build_method = "docker" if has_dockerfile else "pack"
         entry: dict = {
             "type": "image",
+            "image": image,
             "build_method": build_method,
             "context": context,
             "suffix": suffix,
@@ -273,7 +274,7 @@ def build_integration_matrix(artifacts: list[dict], chart_paths: list[str], repo
         path_norm = os.path.normpath(path)
         if path_norm in artifact_contexts:
             continue
-        integration_matrix.append({"type": "chart", "path": path, "output_key": "chart"})
+        integration_matrix.append({"type": "chart", "path": path, "output_key": "chart", "image": ""})
     return integration_matrix
 
 
