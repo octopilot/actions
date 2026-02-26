@@ -29,8 +29,9 @@ inputs:
     default: paketobuildpacks/builder-jammy-base
   build-env:
     description: >
-      Optional env var for the build (e.g. BP_JVM_VERSION=17). Omit or leave
-      empty if not needed.
+      Optional build-time env vars (space-separated, e.g. BP_JVM_VERSION=17
+      BP_GRADLE_BUILD_FILE=build.gradle.kts). Each is passed as --env to pack.
+      Omit or leave empty if not needed.
     required: false
     default: ""
 
@@ -46,11 +47,18 @@ runs:
       run: |
         set -e
         IMAGE="ttl.sh/${{ inputs['ttl-uuid'] }}-${{ inputs['suffix'] }}:${{ inputs['tag'] }}"
-        ENV_ARG=""
-        [ -n "${{ inputs['build-env'] }}" ] && ENV_ARG="--env ${{ inputs['build-env'] }}"
+        ENV_ARGS=()
+        BUILD_ENV="${{ inputs['build-env'] }}"
+        if [[ -n "$BUILD_ENV" ]]; then
+          for v in $BUILD_ENV; do
+            if [[ -n "$v" && "$v" == *"="* ]]; then
+              ENV_ARGS+=(--env "$v")
+            fi
+          done
+        fi
         pack build "$IMAGE" \
           --builder "${{ inputs['builder'] }}" \
           --path "${{ inputs['path'] }}" \
-          $ENV_ARG
+          "${ENV_ARGS[@]}"
         docker push "$IMAGE"
         echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
