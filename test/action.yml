@@ -247,33 +247,48 @@ runs:
         fi
         echo "Helm template and dry-run against Kind succeeded."
 
-    # ── Coverage summary (render in Actions job summary) ───────────────────────
+    # ── Coverage summary (render in Actions job summary; Markdown supported) ───
     - name: Coverage summary
       if: success() && (steps.ctx.outputs.language == 'rust' || steps.ctx.outputs.language == 'go' || steps.ctx.outputs.language == 'python' || steps.ctx.outputs.language == 'node' || steps.ctx.outputs.language == 'java')
       shell: bash
       working-directory: ${{ steps.ctx.outputs.context }}
       run: |
-        echo "## Coverage report" >> "$GITHUB_STEP_SUMMARY"
+        SUMMARY="$GITHUB_STEP_SUMMARY"
+        ARTIFACT="coverage-${{ steps.ctx.outputs.name_slug }}"
+        echo "## Coverage report" >> "$SUMMARY"
+        echo "" >> "$SUMMARY"
         if [ "${{ steps.ctx.outputs.language }}" = "rust" ]; then
-          # TODO: add --output-path and/or --no-open so the report is only written to the summary and not opened
-          (cargo llvm-cov report --summary-only 2>/dev/null || echo "See artifact \`coverage-${{ steps.ctx.outputs.name_slug }}\`") >> "$GITHUB_STEP_SUMMARY"
+          echo "### Rust (llvm-cov)" >> "$SUMMARY"
+          echo '```' >> "$SUMMARY"
+          (cargo llvm-cov report --summary-only 2>/dev/null || echo "See artifact ${ARTIFACT} for full report.") >> "$SUMMARY"
+          echo '```' >> "$SUMMARY"
         elif [ "${{ steps.ctx.outputs.language }}" = "go" ] && [ -f "$GITHUB_WORKSPACE/coverage/coverage.out" ]; then
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "### Go" >> "$SUMMARY"
           MODULE=$(go list -m 2>/dev/null || true)
-          go tool cover -func="$GITHUB_WORKSPACE/coverage/coverage.out" 2>/dev/null | sed "s|^${MODULE}/||" >> "$GITHUB_STEP_SUMMARY" || true
-          echo '```' >> "$GITHUB_STEP_SUMMARY"
+          echo "| File | Function | Coverage |" >> "$SUMMARY"
+          echo "|------|----------|----------|" >> "$SUMMARY"
+          go tool cover -func="$GITHUB_WORKSPACE/coverage/coverage.out" 2>/dev/null | sed "s|^${MODULE}/||" | awk -F'\t' 'NF>=3 { if ($1 ~ /^total/) { print "| **total** | " $2 " | **" $3 "** |" } else { print "| " $1 " | " $2 " | " $3 " |" } }' >> "$SUMMARY" || true
         elif [ "${{ steps.ctx.outputs.language }}" = "python" ]; then
-          # TODO: parse coverage/coverage.xml (e.g. xmllint or a small script) and append a total line to the summary
+          echo "### Python" >> "$SUMMARY"
           if [ -f "$GITHUB_WORKSPACE/coverage/coverage.xml" ]; then
-            echo "Coverage XML and LCOV generated. See artifact \`coverage-${{ steps.ctx.outputs.name_slug }}\`." >> "$GITHUB_STEP_SUMMARY"
+            RATE=$(sed -n 's/.*line-rate="\([^"]*\)".*/\1/p' "$GITHUB_WORKSPACE/coverage/coverage.xml" | head -1)
+            if [ -n "$RATE" ]; then
+              PCT=$(echo "$RATE * 100" | bc 2>/dev/null || echo "$RATE" | awk '{ printf "%.1f", $1*100 }')
+              echo "| Scope | Line coverage |" >> "$SUMMARY"
+              echo "|-------|---------------|" >> "$SUMMARY"
+              echo "| **Total** | **${PCT}%** |" >> "$SUMMARY"
+            fi
+            echo "" >> "$SUMMARY"
+            echo "Full report in artifact \`${ARTIFACT}\` (XML + LCOV)." >> "$SUMMARY"
           fi
         elif [ "${{ steps.ctx.outputs.language }}" = "node" ]; then
-          # TODO: if we keep a text summary from c8/nyc, append that to the summary
+          echo "### Node (c8/nyc)" >> "$SUMMARY"
           if [ -f "$GITHUB_WORKSPACE/coverage/lcov.info" ]; then
-            echo "LCOV report generated. See artifact \`coverage-${{ steps.ctx.outputs.name_slug }}\`." >> "$GITHUB_STEP_SUMMARY"
+            echo "LCOV report generated. See artifact \`${ARTIFACT}\` for full report." >> "$SUMMARY"
           fi
         elif [ "${{ steps.ctx.outputs.language }}" = "java" ]; then
-          echo "Coverage (JaCoCo) in artifact \`coverage-${{ steps.ctx.outputs.name_slug }}\` (if project has JaCoCo)." >> "$GITHUB_STEP_SUMMARY"
+          echo "### Java (JaCoCo)" >> "$SUMMARY"
+          echo "See artifact \`${ARTIFACT}\` for HTML/XML report (if project has JaCoCo)." >> "$SUMMARY"
         fi
 
     # ── Upload coverage report (when produced) ─────────────────────────────────
