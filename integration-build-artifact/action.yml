@@ -13,6 +13,10 @@ inputs:
     description: 'Path to write key=value lines (e.g. outputs.txt)'
     required: false
     default: outputs.txt
+  op_version:
+    description: 'Op image version (e.g. v1.0.4).'
+    required: false
+    default: v1.0.4
 runs:
   using: "composite"
   steps:
@@ -42,6 +46,7 @@ runs:
         ttl-uuid: ${{ inputs.ttl-uuid }}
         ttl-tag: '1h'
         artifact: ${{ steps.parse.outputs.image }}
+        op_version: ${{ inputs.op_version }}
 
     - name: Package and push Helm chart
       id: helm

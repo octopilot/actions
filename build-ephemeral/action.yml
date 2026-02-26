@@ -6,9 +6,9 @@ inputs:
     required: false
     default: '2h'
   op_version:
-    description: 'Version of octopilot-pipeline-tools to use.'
+    description: 'Version of octopilot-pipeline-tools to use (e.g. v1.0.4).'
     required: false
-    default: 'latest'
+    default: 'v1.0.4'
   platform:
     description: 'Platforms to build for (e.g. linux/amd64).'
     required: false
