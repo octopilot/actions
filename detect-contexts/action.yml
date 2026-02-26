@@ -31,7 +31,7 @@ outputs:
     description: "Set when repo has Helm charts (empty; use chart_paths in pipeline-context for paths)"
     value: ${{ steps.detect.outputs.helm-version }}
   pipeline-context:
-    description: "Consolidated CI context object (JSON). Includes matrix, languages, versions, and chart_paths (list of Helm chart dirs) when present."
+    description: "Consolidated CI context object (JSON). Includes matrix, languages, versions, chart_paths, and integration_matrix (build items for CI)."
     value: ${{ steps.detect.outputs.pipeline-context }}
 runs:
   using: "composite"

@@ -1,7 +1,7 @@
 # Install dependencies
 install:
     pip install -e ./common
-    pip install pytest pytest-cov ruff pyre-check
+    pip install pytest pytest-cov ruff pyre-check requests PyNaCl google-cloud-container
 
 # Run linting
 lint:
@@ -17,7 +17,7 @@ check-format:
 
 # Run tests
 test:
-
+    pytest tests/ -v --tb=short --cov=common --cov-report=term-missing
 # Run type checking
 check-types:
     pyre

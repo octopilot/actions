@@ -8,7 +8,11 @@ version = "0.1.11"
 description = "Project-agnostic GitHub Actions for Octopilot"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = [
+    "google-cloud-container",
+    "PyNaCl",
+    "requests",
+]
 
 [project.optional-dependencies]
 dev = [

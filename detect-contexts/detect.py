@@ -111,8 +111,54 @@ def detect_java_version(context: str) -> str:
         match = re.search(r'jvmTarget\s*=\s*["\'](\d+)["\']', content)
         if match:
             return match.group(1)
+        # Gradle Kotlin DSL: JvmTarget.JVM_17
+        match = re.search(r"JvmTarget\.JVM_(\d+)", content)
+        if match:
+            return match.group(1)
 
     return ""
+
+
+def _java_version_to_bp_jvm(version: str) -> str:
+    """Normalize Java version to a major number for BP_JVM_VERSION (e.g. 1.8 -> 8, 17 -> 17)."""
+    if not version:
+        return ""
+    version = version.strip()
+    if version.startswith("1.") and len(version) > 2:
+        return version[2:].split(".")[0] or version
+    return version.split(".")[0]
+
+
+def _gradle_bp_env_from_context(context_abs: str) -> dict[str, str]:
+    """
+    Extract Paketo/Java Gradle buildpack env vars from a Java/Gradle project directory.
+    Only sets vars we can derive from the repo; skaffold buildpacks.env can override.
+    Paketo Gradle buildpack variables (we set BP_JVM_VERSION, BP_GRADLE_BUILD_FILE when derivable):
+      BP_EXCLUDE_FILES          colon-separated globs, matched source files removed
+      BP_GRADLE_ADDITIONAL_BUILD_ARGUMENTS  appended to BP_GRADLE_BUILD_ARGUMENTS
+      BP_GRADLE_BUILD_ARGUMENTS default: --no-daemon -Dorg.gradle.welcome=never assemble
+      BP_GRADLE_BUILD_FILE      main build config file (we set from presence of build.gradle.kts / build.gradle)
+      BP_GRADLE_BUILT_ARTIFACT  default: build/libs/*.[jw]ar
+      BP_GRADLE_BUILT_MODULE    module to find application artifact in
+      BP_GRADLE_INIT_SCRIPT_PATH  path to Gradle init script
+      BP_INCLUDE_FILES          colon-separated globs, matched source files included
+      BP_JAVA_INSTALL_NODE      default: false (Yarn/Node from package.json / yarn.lock)
+      BP_JVM_VERSION            Java major version (we set from Gradle/pom.xml)
+    """
+    out: dict[str, str] = {}
+    info = detect_project_info(context_abs)
+    if not info or info.get("language") != "java":
+        return out
+    version = info.get("version")
+    if version:
+        bp_jvm = _java_version_to_bp_jvm(str(version))
+        if bp_jvm:
+            out["BP_JVM_VERSION"] = bp_jvm
+    if os.path.isfile(os.path.join(context_abs, "build.gradle.kts")):
+        out["BP_GRADLE_BUILD_FILE"] = "build.gradle.kts"
+    elif os.path.isfile(os.path.join(context_abs, "build.gradle")):
+        out["BP_GRADLE_BUILD_FILE"] = "build.gradle"
+    return out
 
 
 def detect_helm_charts(repo_root: str) -> list[str]:
@@ -161,104 +207,127 @@ def detect_project_info(context_path: str) -> dict[str, str | None] | None:
     return info
 
 
-def main():
-    skaffold_file = os.environ.get("SKAFFOLD_FILE", "skaffold.yaml")
-
-    if not os.path.exists(skaffold_file):
-        sys.stderr.write(f"Error: {skaffold_file} not found.\n")
-        # Output empty matrix to avoid workflow failure
-        if "GITHUB_OUTPUT" in os.environ:
-            with open(os.environ["GITHUB_OUTPUT"], "a") as f:
-                f.write("matrix=[]\n")
-                f.write("languages=\n")
-        else:
-            print("matrix=[]")  # noqa: T201
-            print("languages=")  # noqa: T201
-        return
-
-    try:
-        with open(skaffold_file) as f:
-            config = yaml.safe_load(f)
-    except Exception as e:
-        sys.stderr.write(f"Error parsing {skaffold_file}: {e}\n")
-        sys.exit(1)
-
-    artifacts = config.get("build", {}).get("artifacts", [])
-    matrix_include = []
-
+def build_matrix_include(artifacts: list[dict], repo_root: str) -> list[dict]:
+    """Build the test/lint matrix from skaffold artifacts (language detection per context)."""
+    matrix_include: list[dict] = []
     for artifact in artifacts:
         image = artifact.get("image")
         context = artifact.get("context", ".")
-
-        info = detect_project_info(context)
-
+        context_abs = os.path.normpath(os.path.join(repo_root, context))
+        info = detect_project_info(context_abs)
         if info:
             language = info["language"]
-            version = info["version"]
+            version = info["version"] or ""
             sys.stderr.write(f"Detected {language} ({version}) for {image} in {context}\n")
             matrix_include.append({"name": image, "context": context, "language": language, "version": version})
         else:
             sys.stderr.write(f"Could not detect language for {image} in {context}\n")
+    return matrix_include
 
-    # Add one matrix entry per Helm chart so the test job runs helm template per chart
-    repo_root = os.path.dirname(os.path.abspath(skaffold_file))
+
+def build_integration_matrix(artifacts: list[dict], chart_paths: list[str], repo_root: str) -> list[dict]:
+    """Build integration matrix (image docker/pack + chart entries) from skaffold artifacts and chart_paths."""
+    integration_matrix: list[dict] = []
+    for artifact in artifacts:
+        image = artifact.get("image", "")
+        context = artifact.get("context", ".")
+        if not image:
+            continue
+        image_name = image.split("/")[-1].split(":")[0]
+        parts = image_name.split("-")
+        suffix = parts[-1] if parts else image_name
+        output_key = f"image_{suffix}"
+        context_abs = os.path.normpath(os.path.join(repo_root, context))
+        has_dockerfile = os.path.isfile(os.path.join(context_abs, "Dockerfile"))
+        build_method = "docker" if has_dockerfile else "pack"
+        entry: dict = {
+            "type": "image",
+            "build_method": build_method,
+            "context": context,
+            "suffix": suffix,
+            "output_key": output_key,
+        }
+        if build_method == "docker":
+            entry["dockerfile"] = "Dockerfile"
+        if build_method == "pack":
+            buildpacks = artifact.get("buildpacks") or {}
+            entry["builder"] = buildpacks.get("builder", "paketobuildpacks/builder-jammy-base")
+            env = buildpacks.get("env")
+            if isinstance(env, dict):
+                entry["build_env"] = " ".join(f"{k}={v}" for k, v in env.items())
+            elif isinstance(env, str):
+                entry["build_env"] = env
+            elif isinstance(env, list):
+                entry["build_env"] = " ".join(str(e) for e in env)
+            bp_extra = _gradle_bp_env_from_context(context_abs)
+            if bp_extra:
+                existing = entry.get("build_env") or ""
+                existing_keys = {p.split("=", 1)[0] for p in existing.split() if "=" in p}
+                extra_parts = [f"{k}={v}" for k, v in bp_extra.items() if k not in existing_keys]
+                if extra_parts:
+                    entry["build_env"] = f"{existing} {' '.join(extra_parts)}".strip()
+        integration_matrix.append(entry)
+    for path in chart_paths:
+        integration_matrix.append({"type": "chart", "path": path, "output_key": "chart"})
+    return integration_matrix
+
+
+def build_pipeline_context(config: dict, repo_root: str) -> dict:
+    """
+    Build the full pipeline context (matrix, languages, versions, chart_paths, integration_matrix).
+    Pure in terms of config; uses filesystem for detect_project_info, detect_helm_charts, and Dockerfile check.
+    """
+    artifacts = config.get("build", {}).get("artifacts", [])
+    matrix_include = build_matrix_include(artifacts, repo_root)
     chart_paths = detect_helm_charts(repo_root)
     for path in chart_paths:
         name = f"helm-{path}" if path != "." else "helm"
         matrix_include.append({"name": name, "context": path, "language": "helm", "version": ""})
 
-    # Output JSON for GitHub Actions Matrix
-    json_output = json.dumps(matrix_include)
+    integration_matrix = build_integration_matrix(artifacts, chart_paths, repo_root)
 
-    # Output unique languages for lint workflow (comma-separated)
-    # Fix C414/C401: Unnecessary list call within sorted(), set comprehension
     unique_langs_set: set[str] = set()
     for item in matrix_include:
         lang = item.get("language")
         if isinstance(lang, str) and lang:
             unique_langs_set.add(lang)
-
-    # Ensure helm is in unique_langs when we have charts (chart_paths already set above)
     if chart_paths:
         unique_langs_set.add("helm")
         for path in chart_paths:
             sys.stderr.write(f"Detected Helm chart: {path}\n")
-
     unique_langs = sorted(unique_langs_set)
-    langs_output = ",".join(unique_langs)
 
-    # Aggregate versions for repository-wide tools (e.g., lint)
-    # We pick the "latest" version string found for each language as a heuristic
-    versions = {}
+    versions: dict[str, str] = {}
     for lang in unique_langs:
         if lang == "helm":
-            versions[lang] = ""  # No single version; charts are linted via helm lint
+            versions[lang] = ""
             continue
-        # Collect all versions for this language
         langs_versions = {item["version"] for item in matrix_include if item["language"] == lang and item["version"]}
         if langs_versions:
-            # Simple string sort for now (sufficient for standard semver like 1.21 < 1.22)
-            # For complex constraints (>=18), this might just pick one.
-            best_version = sorted(langs_versions)[-1]
-            versions[lang] = best_version
+            versions[lang] = sorted(langs_versions)[-1]
+        else:
+            versions[lang] = ""
 
-    # Create consolidated pipeline context
-    pipeline_context = {
+    return {
         "matrix": matrix_include,
         "languages": unique_langs,
         "versions": versions,
         "chart_paths": chart_paths,
+        "integration_matrix": integration_matrix,
     }
 
-    # Also add individual version keys for convenience if needed,
-    # but the primary goal is to pass `pipeline_context` as a single object.
-    # For backward compatibility or ease of use, we keep the exploded outputs too.
 
+def write_outputs(pipeline_context: dict, github_output_path: str | None = None) -> None:
+    """Write matrix, languages, pipeline-context, and lang-version lines to GITHUB_OUTPUT or stdout."""
+    matrix = pipeline_context.get("matrix", [])
+    languages = pipeline_context.get("languages", [])
+    versions = pipeline_context.get("versions", {})
+    json_output = json.dumps(matrix)
+    langs_output = ",".join(languages)
     pipeline_context_json = json.dumps(pipeline_context)
 
-    # GitHub Actions Output Format
-    if "GITHUB_OUTPUT" in os.environ:
-        with open(os.environ["GITHUB_OUTPUT"], "a") as f:
+    if github_output_path:
+        with open(github_output_path, "a") as f:
             f.write(f"matrix={json_output}\n")
             f.write(f"languages={langs_output}\n")
             f.write(f"pipeline-context={pipeline_context_json}\n")
@@ -270,6 +339,33 @@ def main():
         print(f"pipeline-context={pipeline_context_json}")  # noqa: T201
         for lang, ver in versions.items():
             print(f"{lang}-version={ver}")  # noqa: T201
+
+
+def main() -> None:
+    skaffold_file = os.environ.get("SKAFFOLD_FILE", "skaffold.yaml")
+
+    if not os.path.exists(skaffold_file):
+        sys.stderr.write(f"Error: {skaffold_file} not found.\n")
+        empty_context = {
+            "matrix": [],
+            "languages": [],
+            "versions": {},
+            "chart_paths": [],
+            "integration_matrix": [],
+        }
+        write_outputs(empty_context, os.environ.get("GITHUB_OUTPUT"))
+        return
+
+    try:
+        with open(skaffold_file) as f:
+            config = yaml.safe_load(f)
+    except Exception as e:
+        sys.stderr.write(f"Error parsing {skaffold_file}: {e}\n")
+        sys.exit(1)
+
+    repo_root = os.path.dirname(os.path.abspath(skaffold_file))
+    pipeline_context = build_pipeline_context(config, repo_root)
+    write_outputs(pipeline_context, os.environ.get("GITHUB_OUTPUT"))
 
 
 if __name__ == "__main__":

@@ -1,0 +1,71 @@
+name: 'Integration build one artifact'
+description: >
+  Builds one integration matrix item (image via docker or pack, or chart via helm)
+  and writes key=value output(s) to a file for the workflow to upload.
+inputs:
+  artifact:
+    description: 'JSON object for one matrix item (type, build_method, context, suffix, output_key, path?, dockerfile?, builder?, build_env?)'
+    required: true
+  ttl-uuid:
+    description: 'UUID for ttl.sh image/chart naming'
+    required: true
+  output-path:
+    description: 'Path to write key=value lines (e.g. outputs.txt)'
+    required: false
+    default: outputs.txt
+runs:
+  using: "composite"
+  steps:
+    - name: Parse artifact
+      id: parse
+      shell: bash
+      env:
+        ARTIFACT: ${{ inputs.artifact }}
+      run: |
+        set -e
+        echo "type=$(echo "$ARTIFACT" | jq -r '.type // ""')" >> "$GITHUB_OUTPUT"
+        echo "build_method=$(echo "$ARTIFACT" | jq -r '.build_method // ""')" >> "$GITHUB_OUTPUT"
+        echo "context=$(echo "$ARTIFACT" | jq -r '.context // "."')" >> "$GITHUB_OUTPUT"
+        echo "suffix=$(echo "$ARTIFACT" | jq -r '.suffix // ""')" >> "$GITHUB_OUTPUT"
+        echo "output_key=$(echo "$ARTIFACT" | jq -r '.output_key // ""')" >> "$GITHUB_OUTPUT"
+        echo "path=$(echo "$ARTIFACT" | jq -r '.path // ""')" >> "$GITHUB_OUTPUT"
+        echo "dockerfile=$(echo "$ARTIFACT" | jq -r '.dockerfile // "Dockerfile"')" >> "$GITHUB_OUTPUT"
+        echo "builder=$(echo "$ARTIFACT" | jq -r '.builder // "paketobuildpacks/builder-jammy-base"')" >> "$GITHUB_OUTPUT"
+        echo "build_env=$(echo "$ARTIFACT" | jq -r '.build_env // ""')" >> "$GITHUB_OUTPUT"
+
+    - name: Build and push image (docker)
+      id: docker
+      if: steps.parse.outputs.type == 'image' && steps.parse.outputs.build_method == 'docker'
+      uses: octopilot/actions/docker-to-ttl-sh@main
+      with:
+        ttl-uuid: ${{ inputs.ttl-uuid }}
+        suffix: ${{ steps.parse.outputs.suffix }}
+        context: ${{ steps.parse.outputs.context }}
+        dockerfile: ${{ steps.parse.outputs.dockerfile }}
+
+    - name: Build and push image (pack)
+      id: pack
+      if: steps.parse.outputs.type == 'image' && steps.parse.outputs.build_method == 'pack'
+      uses: octopilot/actions/paketo-to-ttl-sh@main
+      with:
+        ttl-uuid: ${{ inputs.ttl-uuid }}
+        suffix: ${{ steps.parse.outputs.suffix }}
+        path: ${{ steps.parse.outputs.context }}
+        builder: ${{ steps.parse.outputs.builder }}
+        build-env: ${{ steps.parse.outputs.build_env }}
+
+    - name: Package and push Helm chart
+      id: helm
+      if: steps.parse.outputs.type == 'chart'
+      uses: octopilot/actions/helm-to-ttl-sh@main
+      with:
+        ttl-uuid: ${{ inputs.ttl-uuid }}
+        chart-path: ${{ steps.parse.outputs.path }}
+        output-path: ${{ inputs.output-path }}
+
+    - name: Write image output file
+      if: steps.parse.outputs.type == 'image'
+      shell: bash
+      run: |
+        IMAGE="${{ steps.docker.outputs.image }}${{ steps.pack.outputs.image }}"
+        echo "${{ steps.parse.outputs.output_key }}=${IMAGE}" > "${{ inputs.output-path }}"
