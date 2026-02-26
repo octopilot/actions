@@ -415,3 +415,40 @@ build:
         assert "BP_GRADLE_BUILD_FILE" in (cronjob.get("build_env") or "")
         assert chart_entries[0]["output_key"] == "chart"
         assert chart_entries[0]["path"] == "chart"
+
+    def test_integration_matrix_chart_context_skips_duplicate_chart_entry(self, tmp_path, capsys):
+        # When a skaffold artifact has context "chart" (pack + helm buildpack), chart_paths also
+        # contains "chart". We must not add a second type=chart entry — one job (pack) is enough.
+        (tmp_path / "skaffold.yaml").write_text("""apiVersion: skaffold/v4beta7
+kind: Config
+build:
+  artifacts:
+    - image: ghcr.io/org/cronjob-log-monitor
+      context: .
+    - image: ghcr.io/org/cronjob-log-monitor-chart
+      context: chart
+      buildpacks:
+        builder: ghcr.io/octopilot/builder-jammy-base:test
+""")
+        (tmp_path / "Cargo.toml").write_text('[package]\nname = "app"\nversion = "0.1.0"\n')
+        (tmp_path / "chart").mkdir()
+        (tmp_path / "chart" / "Chart.yaml").write_text("name: cronjob-log-monitor\nversion: 0.1.0\n")
+
+        with patch.dict(os.environ, {"SKAFFOLD_FILE": str(tmp_path / "skaffold.yaml")}, clear=False):
+            detect.main()
+
+        captured = capsys.readouterr()
+        assert "pipeline-context=" in captured.out
+        ctx_str = captured.out.split("pipeline-context=")[1].split("\n")[0]
+        ctx = json.loads(ctx_str)
+        im = ctx["integration_matrix"]
+        image_entries = [e for e in im if e.get("type") == "image"]
+        chart_entries = [e for e in im if e.get("type") == "chart"]
+        # Two image artifacts (app + chart), no separate chart entry (chart context already built as image)
+        assert len(image_entries) == 2
+        assert len(chart_entries) == 0
+        chart_image = next((e for e in image_entries if e.get("suffix") == "chart"), None)
+        assert chart_image is not None
+        assert chart_image["context"] == "chart"
+        assert chart_image["output_key"] == "image_chart"
+        assert chart_image["build_method"] == "pack"

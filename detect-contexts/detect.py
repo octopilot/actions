@@ -267,7 +267,12 @@ def build_integration_matrix(artifacts: list[dict], chart_paths: list[str], repo
                 if extra_parts:
                     entry["build_env"] = f"{existing} {' '.join(extra_parts)}".strip()
         integration_matrix.append(entry)
+    # Contexts already built as images (e.g. pack with helm buildpack) — skip duplicate chart entry
+    artifact_contexts = {os.path.normpath(e["context"]) for e in integration_matrix}
     for path in chart_paths:
+        path_norm = os.path.normpath(path)
+        if path_norm in artifact_contexts:
+            continue
         integration_matrix.append({"type": "chart", "path": path, "output_key": "chart"})
     return integration_matrix
 
