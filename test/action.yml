@@ -259,7 +259,8 @@ runs:
           (cargo llvm-cov report --summary-only 2>/dev/null || echo "See artifact \`coverage-${{ steps.ctx.outputs.name_slug }}\`") >> "$GITHUB_STEP_SUMMARY"
         elif [ "${{ steps.ctx.outputs.language }}" = "go" ] && [ -f "$GITHUB_WORKSPACE/coverage/coverage.out" ]; then
           echo '```' >> "$GITHUB_STEP_SUMMARY"
-          go tool cover -func="$GITHUB_WORKSPACE/coverage/coverage.out" >> "$GITHUB_STEP_SUMMARY" 2>/dev/null || true
+          MODULE=$(go list -m 2>/dev/null || true)
+          go tool cover -func="$GITHUB_WORKSPACE/coverage/coverage.out" 2>/dev/null | sed "s|^${MODULE}/||" >> "$GITHUB_STEP_SUMMARY" || true
           echo '```' >> "$GITHUB_STEP_SUMMARY"
         elif [ "${{ steps.ctx.outputs.language }}" = "python" ]; then
           # TODO: parse coverage/coverage.xml (e.g. xmllint or a small script) and append a total line to the summary
