@@ -48,17 +48,31 @@ runs:
         artifact: ${{ steps.parse.outputs.image }}
         op_version: ${{ inputs.op_version }}
 
-    - name: Package and push Helm chart
-      id: helm
-      if: steps.parse.outputs.type == 'chart'
-      uses: octopilot/actions/helm-to-ttl-sh@main
+    - name: Build and push chart (Octopilot)
+      id: chart_build
+      if: steps.parse.outputs.type == 'chart' && steps.parse.outputs.image != ''
+      uses: octopilot/actions/octopilot@main
       with:
         ttl-uuid: ${{ inputs.ttl-uuid }}
-        chart-path: ${{ steps.parse.outputs.path }}
-        output-path: ${{ inputs.output-path }}
+        ttl-tag: '1h'
+        artifact: ${{ steps.parse.outputs.image }}
+        op_version: ${{ inputs.op_version }}
+
+    - name: Chart requires skaffold artifact
+      if: steps.parse.outputs.type == 'chart' && steps.parse.outputs.image == ''
+      shell: bash
+      run: |
+        echo "::error::Chart build via Octopilot requires the chart to be defined in skaffold build.artifacts (with matching context). Add the chart as an artifact or use a repo where the chart is built by skaffold."
+        exit 1
 
     - name: Write image output file
       if: steps.parse.outputs.type == 'image'
       shell: bash
       run: |
         echo "${{ steps.parse.outputs.output_key }}=${{ steps.build.outputs.tag }}" > "${{ inputs.output-path }}"
+
+    - name: Write chart output file
+      if: steps.parse.outputs.type == 'chart' && steps.parse.outputs.image != ''
+      shell: bash
+      run: |
+        echo "${{ steps.parse.outputs.output_key }}=${{ steps.chart_build.outputs.tag }}" > "${{ inputs.output-path }}"
