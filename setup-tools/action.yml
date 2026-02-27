@@ -12,7 +12,7 @@ inputs:
     default: '4.40.5'
   kubectl_version:
     description: 'Version of kubectl'
-    default: '1.29.1'
+    default: '1.32.2'
 runs:
   using: "composite"
   steps:
