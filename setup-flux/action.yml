@@ -1,0 +1,26 @@
+name: 'setup-flux'
+description: 'Setup Flux CLI, install Flux in the cluster, and export components to a file'
+inputs:
+  export_path:
+    description: 'Path to write flux install --export output (e.g. k8s/deployment/flux-system/gotk-components.yaml)'
+    required: true
+  version:
+    description: 'Flux CLI version'
+    default: 'latest'
+runs:
+  using: "composite"
+  steps:
+    - name: Setup Flux CLI
+      uses: fluxcd/flux2/action@main
+      with:
+        version: ${{ inputs.version }}
+
+    - name: Install Flux and export components
+      shell: bash
+      run: |
+        set -e
+        mkdir -p "$(dirname "${{ inputs.export_path }}")"
+        flux install --export > "${{ inputs.export_path }}"
+        kubectl apply -f "${{ inputs.export_path }}"
+        kubectl wait --for=condition=ready pod -l app=source-controller -n flux-system --timeout=120s || true
+        kubectl wait --for=condition=ready pod -l app=helm-controller -n flux-system --timeout=120s || true
