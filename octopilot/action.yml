@@ -26,9 +26,9 @@ inputs:
     required: false
     default: ''
   op_version:
-    description: 'Version of octopilot-pipeline-tools to use (e.g. v1.0.6).'
+    description: 'Version of octopilot-pipeline-tools to use (e.g. v1.0.8).'
     required: false
-    default: 'v1.06'
+    default: 'v1.08'
   sbom_output:
     description: 'Path to output SBOMs.'
     required: false
