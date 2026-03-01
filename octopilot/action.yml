@@ -26,9 +26,9 @@ inputs:
     required: false
     default: ''
   op_version:
-    description: 'Version of octopilot-pipeline-tools to use (e.g. v1.0.5).'
+    description: 'Version of octopilot-pipeline-tools to use (e.g. v1.0.6).'
     required: false
-    default: 'v1.05'
+    default: 'v1.06'
   sbom_output:
     description: 'Path to output SBOMs.'
     required: false
@@ -126,6 +126,7 @@ runs:
                 -e DOCKER_METADATA_OUTPUT_VERSION="${VERSION}" \
                 -e GITHUB_ACTIONS="true" \
                 -e CI="true" \
+                -e GITHUB_WORKSPACE="${GITHUB_WORKSPACE}" \
                 -e OP_TTL_UUID="${INPUT_TTL_UUID}" \
                 -e OP_TTL_TAG="${INPUT_TTL_TAG}" \
                 -e OP_REGISTRY="${INPUT_REGISTRY}" \
