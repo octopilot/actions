@@ -14,9 +14,9 @@ inputs:
     required: false
     default: outputs.txt
   op_version:
-    description: 'Op image version (e.g. v1.0.14). Must be v1.0.14+ for chart artifacts (no run image).'
+    description: 'Op image version (e.g. v1.0.15). Must be v1.0.15+ for chart artifacts (no run image).'
     required: false
-    default: v1.0.14
+    default: v1.0.15
 runs:
   using: "composite"
   steps:
