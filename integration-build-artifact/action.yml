@@ -14,9 +14,9 @@ inputs:
     required: false
     default: outputs.txt
   op_version:
-    description: 'Op image version (e.g. v1.0.16). Must be v1.0.16+ for chart artifacts (no run image).'
+    description: 'Op image version (e.g. v1.0.17). Must be v1.0.17+ for chart artifacts (no run image).'
     required: false
-    default: v1.0.16
+    default: v1.0.17
   docker_host:
     description: 'When set (e.g. tcp://host.docker.internal:2375), op uses this DOCKER_HOST. Use with job-level DinD service when the runner has no Docker socket (required for chart builds).'
     required: false
