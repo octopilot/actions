@@ -14,9 +14,13 @@ inputs:
     required: false
     default: outputs.txt
   op_version:
-    description: 'Op image version (e.g. v1.0.15). Must be v1.0.15+ for chart artifacts (no run image).'
+    description: 'Op image version (e.g. v1.0.16). Must be v1.0.16+ for chart artifacts (no run image).'
     required: false
-    default: v1.0.15
+    default: v1.0.16
+  docker_host:
+    description: 'When set (e.g. tcp://host.docker.internal:2375), op uses this DOCKER_HOST. Use with job-level DinD service when the runner has no Docker socket (required for chart builds).'
+    required: false
+    default: ''
 runs:
   using: "composite"
   steps:
@@ -47,6 +51,7 @@ runs:
         ttl-tag: '1h'
         artifact: ${{ steps.parse.outputs.image }}
         op_version: ${{ inputs.op_version }}
+        docker_host: ${{ inputs.docker_host }}
 
     - name: Build and push chart (Octopilot)
       id: chart_build
@@ -57,6 +62,7 @@ runs:
         ttl-tag: '1h'
         artifact: ${{ steps.parse.outputs.image }}
         op_version: ${{ inputs.op_version }}
+        docker_host: ${{ inputs.docker_host }}
 
     - name: Chart requires skaffold artifact
       if: steps.parse.outputs.type == 'chart' && steps.parse.outputs.image == ''
