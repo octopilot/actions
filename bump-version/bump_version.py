@@ -413,14 +413,14 @@ def main():
         elif mode == "buildpack":
             file_path_str = "buildpack.toml"
 
+    # buildpack: assume checkout is the buildpack repo; version file is always at ./buildpack.toml
+    if mode == "buildpack":
+        file_path_str = "buildpack.toml"
+
     file_path = Path(file_path_str)
     if not file_path.is_file():
-        # buildpack: monorepo path (e.g. buildpacks/rust/buildpack.toml) missing in standalone repo → try buildpack.toml
-        if mode == "buildpack" and file_path_str and Path("buildpack.toml").is_file():
-            file_path = Path("buildpack.toml")
-        else:
-            print(f"Error: Version file '{file_path}' not found.", file=sys.stderr)
-            sys.exit(1)
+        print(f"Error: Version file '{file_path}' not found.", file=sys.stderr)
+        sys.exit(1)
 
     print(f"Reading current version from {file_path}...")
     content = file_path.read_text(encoding="utf-8")
