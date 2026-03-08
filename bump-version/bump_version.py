@@ -416,6 +416,10 @@ def main():
         elif mode == "buildpack":
             file_path_str = "buildpack.toml"
 
+    # buildpack: always use buildpack.toml (avoids "." or "" from omitted INPUT_FILE in older images)
+    if mode == "buildpack":
+        file_path_str = "buildpack.toml"
+
     file_path = Path(file_path_str)
     if not file_path.is_file():
         print(f"Error: Version file '{file_path}' not found.", file=sys.stderr)
