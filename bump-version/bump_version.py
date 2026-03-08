@@ -318,6 +318,30 @@ def replace_version_in_file_dotnet(path: Path, old: str, new: str) -> bool:
     return False
 
 
+def get_current_version_buildpack(content: str) -> str:
+    # buildpack.toml: version = "0.1.9" (any section, first match)
+    match = re.search(r'\s*version\s*=\s*"(\d+\.\d+\.\d+(?:-[\w.-]+)?)"', content)
+    if not match:
+        raise ValueError("Could not find version in buildpack.toml")
+    return match.group(1)
+
+
+def replace_version_in_file_buildpack(path: Path, old: str, new: str) -> bool:
+    try:
+        text = path.read_text(encoding="utf-8")
+    except Exception as e:
+        print(f"Warning: Could not read {path}: {e}", file=sys.stderr)
+        return False
+
+    pat = r'(\s*version\s*=\s*")' + re.escape(old) + r'(")'
+    if re.search(pat, text):
+        new_content = re.sub(pat, lambda m: m.group(1) + new + m.group(2), text, count=1)
+        if text != new_content:
+            path.write_text(new_content, encoding="utf-8")
+            return True
+    return False
+
+
 def get_current_version_text(content: str) -> str:
     # First line, stripped
     return content.strip().splitlines()[0]
@@ -386,12 +410,17 @@ def main():
                 sys.exit(1)
         elif mode == "text":
             file_path_str = "VERSION"
+        elif mode == "buildpack":
+            file_path_str = "buildpack.toml"
 
     file_path = Path(file_path_str)
     if not file_path.is_file():
-        # Only error if we expect it to exist. For gradle auto-detect we might fail.
-        print(f"Error: Version file '{file_path}' not found.", file=sys.stderr)
-        sys.exit(1)
+        # buildpack: monorepo path (e.g. buildpacks/rust/buildpack.toml) missing in standalone repo → try buildpack.toml
+        if mode == "buildpack" and file_path_str and Path("buildpack.toml").is_file():
+            file_path = Path("buildpack.toml")
+        else:
+            print(f"Error: Version file '{file_path}' not found.", file=sys.stderr)
+            sys.exit(1)
 
     print(f"Reading current version from {file_path}...")
     content = file_path.read_text(encoding="utf-8")
@@ -413,6 +442,8 @@ def main():
             current_version = get_current_version_dotnet(content)
         elif mode == "text":
             current_version = get_current_version_text(content)
+        elif mode == "buildpack":
+            current_version = get_current_version_buildpack(content)
         else:
             print(f"Error: Unsupported mode '{mode}'", file=sys.stderr)
             sys.exit(1)
@@ -447,6 +478,9 @@ def main():
             updated_files.append(file_path)
     elif mode == "text":
         if replace_version_in_file_text(file_path, current_version, new_version):
+            updated_files.append(file_path)
+    elif mode == "buildpack":
+        if replace_version_in_file_buildpack(file_path, current_version, new_version):
             updated_files.append(file_path)
     elif mode == "rust":
         # For Rust, we walk the whole workspace

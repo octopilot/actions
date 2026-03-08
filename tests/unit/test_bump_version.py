@@ -156,6 +156,32 @@ version = "0.0.1" # Distinct version
     assert 'version = "0.0.1"' in f.read_text(encoding="utf-8")
 
 
+# --- Buildpack (buildpack.toml) ---
+
+
+def test_get_current_version_buildpack():
+    content = """api = "0.7"
+
+[buildpack]
+  id = "octopilot/rust"
+  name = "Octopilot Rust Buildpack"
+  version = "0.1.9"
+  keywords = ["rust"]
+"""
+    assert bump_version.get_current_version_buildpack(content) == "0.1.9"
+
+
+def test_replace_version_in_file_buildpack(tmp_path):
+    f = tmp_path / "buildpack.toml"
+    content = """[buildpack]
+  id = "octopilot/rust"
+  version = "0.1.9"
+"""
+    f.write_text(content, encoding="utf-8")
+    assert bump_version.replace_version_in_file_buildpack(f, "0.1.9", "0.1.10") is True
+    assert 'version = "0.1.10"' in f.read_text(encoding="utf-8")
+
+
 # --- Integration / Workspace Scan Logic ---
 
 
