@@ -376,7 +376,10 @@ def _cargo_toml_paths(project_root: Path) -> list[Path]:
 def main():
     mode = os.environ.get("INPUT_MODE", "go")
     bump_type = os.environ.get("INPUT_BUMP", "patch")
-    file_path_str = os.environ.get("INPUT_FILE", "")
+    file_path_str = (os.environ.get("INPUT_FILE") or "").strip() or ""
+    # buildpack: always use ./buildpack.toml (checkout is the buildpack repo; ignore INPUT_FILE)
+    if mode == "buildpack":
+        file_path_str = ""
 
     if not file_path_str:
         if mode == "go":
@@ -412,10 +415,6 @@ def main():
             file_path_str = "VERSION"
         elif mode == "buildpack":
             file_path_str = "buildpack.toml"
-
-    # buildpack: assume checkout is the buildpack repo; version file is always at ./buildpack.toml
-    if mode == "buildpack":
-        file_path_str = "buildpack.toml"
 
     file_path = Path(file_path_str)
     if not file_path.is_file():
