@@ -1,0 +1,67 @@
+name: 'Kotlin lint (ktlint)'
+description: >
+  Standalone ktlint for plain Kotlin repos: checkstyle XML plus PR annotations via
+  yutailang0119/action-ktlint. No Octopilot or Gradle required (see README).
+
+inputs:
+  working-directory:
+    description: >
+      Directory to run ktlint in (repository root use `.`, or a subfolder for a Kotlin-only package in a monorepo).
+    required: false
+    default: '.'
+  ktlint-version:
+    description: 'ktlint release tag from pinterest/ktlint (e.g. 1.7.1)'
+    required: false
+    default: '1.7.1'
+  ignore-warnings:
+    description: 'Ignore warning-severity findings in action-ktlint annotations'
+    required: false
+    default: 'true'
+  report-directory:
+    description: 'Directory for the checkstyle XML report'
+    required: false
+    default: 'build'
+  report-filename:
+    description: 'Checkstyle report filename under report-directory'
+    required: false
+    default: 'ktlint-report.xml'
+  kotlin-extra-args:
+    description: 'Extra arguments passed to ktlint (space-separated)'
+    required: false
+    default: ''
+  fail-on-error:
+    description: >
+      When true, the annotation step exits with a non-zero status if the report
+      contains error-severity issues (recommended for CI gates).
+    required: false
+    default: 'true'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install ktlint
+      shell: bash
+      run: |
+        set -euo pipefail
+        VERSION="${{ inputs.ktlint-version }}"
+        curl -sSLO "https://github.com/pinterest/ktlint/releases/download/${VERSION}/ktlint"
+        chmod a+x ktlint
+        sudo mv ktlint /usr/local/bin/
+        ktlint --version
+
+    - name: Run ktlint (checkstyle report)
+      shell: bash
+      working-directory: ${{ inputs.working-directory }}
+      run: |
+        set -euo pipefail
+        mkdir -p "${{ inputs.report-directory }}"
+        REPORT="${{ inputs.report-directory }}/${{ inputs.report-filename }}"
+        ktlint --reporter=checkstyle,output="$REPORT" ${{ inputs.kotlin-extra-args }}
+      continue-on-error: true
+
+    - name: Annotate with ktlint results
+      uses: yutailang0119/action-ktlint@v5
+      with:
+        report-path: ${{ inputs.working-directory == '.' && format('{0}/*.xml', inputs.report-directory) || format('{0}/{1}/*.xml', inputs.working-directory, inputs.report-directory) }}
+        ignore-warnings: ${{ inputs.ignore-warnings }}
+      continue-on-error: ${{ inputs.fail-on-error != 'true' }}

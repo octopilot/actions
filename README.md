@@ -19,6 +19,7 @@ Official GitHub Actions for the Octopilot ecosystem. This monorepo contains a su
 | [**octopilot**](octopilot/README.md) | Run Octopilot CLI (`op`) commands as a GitHub Action. |
 | [**is-tag**](is-tag/README.md) | Checks if the current commit is a tag. |
 | [**previous-tag**](previous-tag/README.md) | Finds the previous tag relative to the current commit. |
+| [**kotlin-lint**](kotlin-lint/README.md) | Runs ktlint with Checkstyle XML and PR annotations via action-ktlint. |
 
 ## Usage
 
