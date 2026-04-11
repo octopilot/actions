@@ -106,6 +106,8 @@ runs:
             [ -n "${INPUT_ARTIFACT}" ] && OP_ARTIFACT="--artifact ${INPUT_ARTIFACT}"
             if [ -n "${INPUT_TTL_UUID}" ]; then
               "${INPUT_OP_BINARY}" build --ttl-uuid "${INPUT_TTL_UUID}" --ttl-tag "${INPUT_TTL_TAG:-1h}" $OP_ARTIFACT --platform "${INPUT_PLATFORMS}" --push --sbom-output "${INPUT_SBOM_OUTPUT}"
+            elif [ -n "${INPUT_ARTIFACT}" ] && [ "${INPUT_ARTIFACT#$INPUT_REGISTRY}" != "${INPUT_ARTIFACT}" ]; then
+              "${INPUT_OP_BINARY}" build $OP_ARTIFACT --platform "${INPUT_PLATFORMS}" --push --sbom-output "${INPUT_SBOM_OUTPUT}"
             else
               "${INPUT_OP_BINARY}" build --repo "${INPUT_REGISTRY}" $OP_ARTIFACT --platform "${INPUT_PLATFORMS}" --push --sbom-output "${INPUT_SBOM_OUTPUT}"
             fi
@@ -152,7 +154,12 @@ runs:
                   if [ -n "$OP_TTL_UUID" ]; then
                     OP_REPO_ARG=""; OP_EXTRA="--ttl-uuid $OP_TTL_UUID --ttl-tag ${OP_TTL_TAG:-1h}"
                   else
-                    OP_REPO_ARG="--repo $OP_REGISTRY"; OP_EXTRA=""
+                    if [ -n "$OP_ARTIFACT" ] && [ "${OP_ARTIFACT#$OP_REGISTRY}" != "$OP_ARTIFACT" ]; then
+                      OP_REPO_ARG=""
+                    else
+                      OP_REPO_ARG="--repo $OP_REGISTRY"
+                    fi
+                    OP_EXTRA=""
                   fi && \
                   OP_ARTIFACT_ARG=""; [ -n "$OP_ARTIFACT" ] && OP_ARTIFACT_ARG="--artifact $OP_ARTIFACT" && \
                   op build $OP_REPO_ARG $OP_EXTRA $OP_ARTIFACT_ARG --platform "$OP_PLATFORMS" --push --sbom-output "$OP_SBOM_OUTPUT"'
