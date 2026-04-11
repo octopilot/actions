@@ -13,6 +13,10 @@ inputs:
     description: 'Path to write key=value lines (e.g. outputs.txt)'
     required: false
     default: outputs.txt
+  ttl-tag:
+    description: 'Tag for ttl.sh when ttl-uuid is set (default 1d).'
+    required: false
+    default: '1d'
   op_version:
     description: 'Op image version (e.g. v1.0.17). Must be v1.0.17+ for chart artifacts (no run image).'
     required: false
@@ -48,7 +52,7 @@ runs:
       uses: octopilot/actions/octopilot@main
       with:
         ttl-uuid: ${{ inputs.ttl-uuid }}
-        ttl-tag: '1h'
+        ttl-tag: ${{ inputs.ttl-tag }}
         artifact: ${{ steps.parse.outputs.image }}
         op_version: ${{ inputs.op_version }}
         docker_host: ${{ inputs.docker_host }}
@@ -59,7 +63,7 @@ runs:
       uses: octopilot/actions/octopilot@main
       with:
         ttl-uuid: ${{ inputs.ttl-uuid }}
-        ttl-tag: '1h'
+        ttl-tag: ${{ inputs.ttl-tag }}
         artifact: ${{ steps.parse.outputs.image }}
         op_version: ${{ inputs.op_version }}
         docker_host: ${{ inputs.docker_host }}
