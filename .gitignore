@@ -10,4 +10,4 @@ venv/
 htmlcov/
 .pyre_configuration
 .pyre/
-
+*._*

@@ -242,6 +242,13 @@ class TestBuildPipelineContext:
 
 
 class TestMainEarlyExit:
+    @pytest.fixture(autouse=True)
+    def _no_github_output(self, monkeypatch):
+        # These assertions read stdout. The Actions runner sets GITHUB_OUTPUT,
+        # which would redirect write_outputs() to a file; unset it so output
+        # goes to stdout regardless of environment.
+        monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+
     def test_missing_skaffold_outputs_empty_pipeline_context(self, tmp_path, capsys):
         with patch.dict(os.environ, {"SKAFFOLD_FILE": str(tmp_path / "nonexistent.yaml")}, clear=False):
             detect.main()
@@ -255,6 +262,12 @@ class TestMainEarlyExit:
 
 
 class TestMain:
+    @pytest.fixture(autouse=True)
+    def _no_github_output(self, monkeypatch):
+        # Assertions read stdout; keep write_outputs() off any GITHUB_OUTPUT file
+        # set by the Actions runner.
+        monkeypatch.delenv("GITHUB_OUTPUT", raising=False)
+
     @pytest.fixture
     def mock_skaffold_yaml(self):
         return """

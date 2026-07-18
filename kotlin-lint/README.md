@@ -67,6 +67,24 @@ Set `working-directory` when sources live under a path (for example a monorepo p
 | `kotlin-extra-args` | Extra arguments passed to `ktlint` | _(empty)_ |
 | `fail-on-error` | Fail the job when the report contains errors | `true` |
 
+## Troubleshooting
+
+### `Expected format {org}/{repo}[/path]@ref` / `Actual 'octopilot/actions/kotlin-lint@'`
+
+GitHub requires a **non-empty ref** after `@` (branch or tag, e.g. `main` or `v1.0.0`).
+
+This error usually means the ref was dropped, often because `uses` was written with a **dynamic expression that evaluated to empty**:
+
+```yaml
+# Bad — if inputs.actions-ref or the variable is empty, parsing fails
+uses: octopilot/actions/kotlin-lint@${{ inputs.actions-ref }}
+
+# Good — literal ref
+uses: octopilot/actions/kotlin-lint@main
+```
+
+If you must parameterize the ref, give the workflow input a **default of `main`** and avoid passing an empty `with:` value from callers. You can also coalesce in expressions (GitHub Actions): `inputs.actions-ref || 'main'` — verify in your docs that empty string is not passed explicitly, which can override defaults.
+
 ## Behaviour
 
 1. Installs the ktlint binary for the requested version.
