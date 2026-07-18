@@ -58,6 +58,15 @@ on:
         description: "deployment-configuration profile environment to apply (e.g. dev, ci)."
         type: string
         default: dev
+    secrets:
+      # Declared (not just inherited) so the secrets context is reliably wired
+      # into this workflow across repos/orgs. Callers pass `secrets: inherit`.
+      SOPS_AGE_KEY:
+        description: age private key that decrypts the integration profile secrets.
+        required: false
+      ANTHROPIC_API_KEY:
+        description: API key for AI-generated release notes (tags only).
+        required: false
     outputs:
       pipeline-context:
         description: Detected pipeline context (JSON) from detect-contexts.
