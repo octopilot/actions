@@ -37,6 +37,22 @@ on:
           main; pin (e.g. v1) alongside the reusable workflow for reproducibility.
         type: string
         default: main
+      integration:
+        description: >
+          Opt in to the generic integration deploy (Kind + Flux HelmRelease).
+          Set true only when the repo provides the documented integration bits:
+          a Helm chart (detected from skaffold), a Flux overlay at `k8s/env/ci`
+          whose HelmRelease injects images via ${IMG_<sanitized-image-name>}
+          (e.g. IMG_fleetingdns_api) and the chart ref via ${CHART_OCI_URL} /
+          ${CHART_REF_TYPE} / ${CHART_REF_VALUE}, optional ephemeral deps at
+          `hack/ci-deps/`, and an optional SOPS runtime profile under
+          `deployment-configuration/`. See the Octopilot integration docs.
+        type: boolean
+        default: false
+      namespace:
+        description: "Target namespace for the integration deploy (default: repo name)."
+        type: string
+        default: ''
     outputs:
       pipeline-context:
         description: Detected pipeline context (JSON) from detect-contexts.
@@ -137,3 +153,163 @@ jobs:
           name: integration-${{ matrix.output_key }}
           path: artifact-out
           retention-days: 1
+
+  # ── 4c. Integration deploy (generic; opt-in via inputs.integration) ─────────
+  # Stands the app up in Kind via a Flux HelmRelease, discovering every
+  # repo-specific aspect from conventions + build_result.json so this workflow
+  # stays repo-agnostic:
+  #   • namespace      → repo name (or inputs.namespace)
+  #   • images         → IMG_<sanitized-image-name> env vars for every non-chart
+  #                      build; the repo's k8s/env/ci overlay consumes them
+  #   • chart          → name/ref from the detected chart + the -chart build
+  #   • Flux resources → discovered via `kubectl get ocirepository,helmrelease`
+  #   • ci-deps        → hack/ci-deps/ applied if present
+  #   • secret         → RERP runtime *.secrets.env decrypted; name read from
+  #                      that profile's kustomization; skipped without SOPS_AGE_KEY
+  integration-deploy:
+    name: Integration (deploy)
+    needs: [detect, integration-artifacts]
+    if: ${{ inputs.integration }}
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifact outputs
+        uses: actions/download-artifact@v4
+        with:
+          pattern: integration-*
+          path: artifact-outputs
+
+      - name: Merge build_result.json
+        uses: octopilot/actions/merge-build-results@main
+        with:
+          directory: artifact-outputs
+          output-path: build_result.json
+
+      - name: Resolve deploy context (namespace, chart, images, secret)
+        env:
+          PIPELINE_CONTEXT: ${{ needs.detect.outputs.pipeline-context }}
+          NS_INPUT: ${{ inputs.namespace }}
+        run: |
+          set -e
+          NS="${NS_INPUT:-${GITHUB_REPOSITORY##*/}}"
+          echo "NS=$NS" >> "$GITHUB_ENV"
+
+          # Chart directory + name (detected chart_paths, else search the tree)
+          CHART_DIR="$(echo "$PIPELINE_CONTEXT" | jq -r '.chart_paths[0] // ""')"
+          [ -n "$CHART_DIR" ] || CHART_DIR="$(dirname "$(git ls-files '**/Chart.yaml' | head -1)")"
+          CHART_NAME="$(grep -E '^name:' "$CHART_DIR/Chart.yaml" | sed 's/^name:[[:space:]]*//;s/[[:space:]]*$//')"
+
+          # Chart OCI ref from the -chart build; normalise to Helm OCI shape.
+          IMAGE_CHART="$(jq -r '.builds[] | select(.imageName|test("-chart$")) | .tag' build_result.json | head -1)"
+          if ! echo "$IMAGE_CHART" | grep -qE "/${CHART_NAME}:"; then
+            if echo "$IMAGE_CHART" | grep -qE -- '-chart:[^@]+'; then
+              IMAGE_CHART="$(echo "$IMAGE_CHART" | sed "s|-chart:|-chart/${CHART_NAME}:|")"
+            else
+              echo "::error::Chart ref missing chart-name segment: $IMAGE_CHART"; exit 1
+            fi
+          fi
+          if echo "$IMAGE_CHART" | grep -q '@sha256:'; then
+            CHART_REF="oci://$(echo "$IMAGE_CHART" | sed 's/:[^@]*@/@/')"
+          else
+            CHART_REF="oci://${IMAGE_CHART}"
+          fi
+          {
+            echo "CHART_OCI_URL=$(echo "$CHART_REF" | sed 's|^oci://||' | cut -d'@' -f1)"
+            echo "CHART_REF_TYPE=digest"
+            echo "CHART_REF_VALUE=$(echo "$CHART_REF" | sed 's|^oci://||' | cut -d'@' -f2)"
+          } >> "$GITHUB_ENV"
+
+          # IMG_<sanitized-image-name> for every non-chart image (envsubst input).
+          jq -r '.builds[] | select((.imageName|test("-chart$"))|not) | "\(.imageName)\t\(.tag)"' build_result.json \
+          | while IFS="$(printf '\t')" read -r name tag; do
+              var="IMG_$(basename "$name" | tr -c 'A-Za-z0-9' '_')"
+              echo "$var=$tag" >> "$GITHUB_ENV"
+              echo "resolved $var=$tag"
+            done
+
+          # RERP SOPS runtime profile (optional): secret name lives in repo data.
+          SECRETS_FILE="$(find deployment-configuration -path '*runtime*' -name '*.secrets.env' 2>/dev/null | head -1 || true)"
+          if [ -n "$SECRETS_FILE" ]; then
+            KUST="$(dirname "$SECRETS_FILE")/kustomization.yaml"
+            SECRET_NAME="$(grep -A20 'secretGenerator:' "$KUST" 2>/dev/null | grep -m1 -E '^[[:space:]]*-?[[:space:]]*name:' | sed 's/.*name:[[:space:]]*//')"
+            echo "SECRETS_FILE=$SECRETS_FILE" >> "$GITHUB_ENV"
+            echo "SECRET_NAME=$SECRET_NAME" >> "$GITHUB_ENV"
+          fi
+          echo "namespace=$NS  chart=$CHART_NAME  chart_ref=$CHART_REF"
+
+      - name: Decrypt runtime secret (SOPS + age)
+        id: sops
+        if: ${{ env.SECRETS_FILE != '' && secrets.SOPS_AGE_KEY != '' }}
+        uses: octopilot/actions/sops-decrypt@main
+        with:
+          file: ${{ env.SECRETS_FILE }}
+          age_key: ${{ secrets.SOPS_AGE_KEY }}
+          output_type: dotenv
+
+      - name: Create Kind cluster (Kubernetes 1.34.3)
+        uses: helm/kind-action@v1
+        with:
+          version: v0.31.0
+          node_image: kindest/node:v1.34.3
+          cluster_name: octopilot-integration
+          wait: 120s
+
+      - name: Setup kubectl
+        uses: octopilot/actions/setup-tools@main
+        with:
+          kubectl_version: "1.34.3"
+
+      - name: Namespace, secret and ephemeral deps
+        env:
+          SECRET_DOTENV: ${{ steps.sops.outputs.data }}
+        run: |
+          set -e
+          kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f -
+          if [ -n "${SECRET_NAME:-}" ] && [ -n "${SECRET_DOTENV:-}" ]; then
+            printf '%s\n' "$SECRET_DOTENV" > /tmp/secret.env
+            kubectl create secret generic "$SECRET_NAME" -n "$NS" --from-env-file=/tmp/secret.env \
+              --dry-run=client -o yaml | kubectl apply -f -
+            rm -f /tmp/secret.env
+            echo "created secret $SECRET_NAME"
+          fi
+          if [ -d hack/ci-deps ]; then
+            kubectl apply -n "$NS" -f hack/ci-deps/
+            kubectl wait --for=condition=available deploy --all -n "$NS" --timeout=180s || true
+          fi
+
+      - name: Setup Flux in Kind
+        uses: octopilot/actions/setup-flux@main
+        with:
+          export_path: /tmp/gotk-components.yaml
+
+      - name: Deploy via Flux (discover + reconcile)
+        run: |
+          set -e
+          RECONCILE_FAILED=0
+          OVERLAY="k8s/env/ci"
+          [ -d "$OVERLAY" ] || OVERLAY="$(dirname "$(git ls-files '**/env/ci/kustomization.yaml' | head -1)")"
+          kubectl kustomize "$OVERLAY" | envsubst | kubectl apply -f -
+          for oci in $(kubectl get ocirepository -n "$NS" -o name 2>/dev/null); do
+            flux reconcile source oci "${oci##*/}" -n "$NS" --timeout=2m || RECONCILE_FAILED=1
+          done
+          for hr in $(kubectl get helmrelease -n "$NS" -o name 2>/dev/null); do
+            flux reconcile helmrelease "${hr##*/}" -n "$NS" --timeout=8m || RECONCILE_FAILED=1
+          done
+          kubectl get all -n "$NS"
+          flux get helmrelease -n "$NS" || true
+          if [ "$RECONCILE_FAILED" -ne 0 ]; then
+            echo "::group::Integration deploy diagnostics"
+            kubectl logs -n flux-system -l app=helm-controller --tail=200 --all-containers=true 2>/dev/null || true
+            kubectl get events -n "$NS" --sort-by='.lastTimestamp' 2>/dev/null | tail -80 || true
+            kubectl describe pods -n "$NS" 2>/dev/null | tail -200 || true
+            for j in $(kubectl get jobs -n "$NS" -o name 2>/dev/null); do
+              echo "--- $j ---"; kubectl logs -n "$NS" "$j" --tail=100 2>/dev/null || true
+            done
+            for p in $(kubectl get pods -n "$NS" -o name 2>/dev/null); do
+              echo "--- $p ---"; kubectl logs -n "$NS" "$p" --tail=60 --all-containers=true 2>/dev/null || true
+            done
+            flux get all -n "$NS" 2>/dev/null || true
+            echo "::endgroup::"
+            exit 1
+          fi
