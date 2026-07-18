@@ -43,16 +43,21 @@ on:
           Set true only when the repo provides the documented integration bits:
           a Helm chart (detected from skaffold), a Flux overlay at `k8s/env/ci`
           whose HelmRelease injects images via ${IMG_<sanitized-image-name>}
-          (e.g. IMG_fleetingdns_api) and the chart ref via ${CHART_OCI_URL} /
-          ${CHART_REF_TYPE} / ${CHART_REF_VALUE}, optional ephemeral deps at
-          `hack/ci-deps/`, and an optional SOPS runtime profile under
-          `deployment-configuration/`. See the Octopilot integration docs.
+          (an image basename `myapp-api` becomes ${IMG_myapp_api}) and the chart
+          ref via ${CHART_OCI_URL} / ${CHART_REF_TYPE} / ${CHART_REF_VALUE},
+          optional ephemeral deps at `hack/ci-deps/`, and an optional
+          deployment-configuration profile (kustomization + SOPS secrets). See
+          the Octopilot integration docs.
         type: boolean
         default: false
       namespace:
         description: "Target namespace for the integration deploy (default: repo name)."
         type: string
         default: ''
+      profile:
+        description: "deployment-configuration profile environment to apply (e.g. dev, ci)."
+        type: string
+        default: dev
     outputs:
       pipeline-context:
         description: Detected pipeline context (JSON) from detect-contexts.
@@ -234,28 +239,7 @@ jobs:
               echo "resolved $var=$tag"
             done
 
-          # RERP SOPS runtime profile (optional): secret name lives in repo data.
-          SECRETS_FILE="$(find deployment-configuration -path '*runtime*' -name '*.secrets.env' 2>/dev/null | head -1 || true)"
-          if [ -n "$SECRETS_FILE" ]; then
-            KUST="$(dirname "$SECRETS_FILE")/kustomization.yaml"
-            SECRET_NAME="$(grep -A20 'secretGenerator:' "$KUST" 2>/dev/null | grep -m1 -E '^[[:space:]]*-?[[:space:]]*name:' | sed 's/.*name:[[:space:]]*//')"
-            echo "SECRETS_FILE=$SECRETS_FILE" >> "$GITHUB_ENV"
-            echo "SECRET_NAME=$SECRET_NAME" >> "$GITHUB_ENV"
-          fi
           echo "namespace=$NS  chart=$CHART_NAME  chart_ref=$CHART_REF"
-
-      # Gate only on the file — a secret's presence cannot be tested in `if:`
-      # (secret-derived env is masked to empty there). continue-on-error lets a
-      # fork PR without SOPS_AGE_KEY proceed (no secret created).
-      - name: Decrypt runtime secret (SOPS + age)
-        id: sops
-        if: ${{ env.SECRETS_FILE != '' }}
-        continue-on-error: true
-        uses: octopilot/actions/sops-decrypt@main
-        with:
-          file: ${{ env.SECRETS_FILE }}
-          age_key: ${{ secrets.SOPS_AGE_KEY }}
-          output_type: dotenv
 
       - name: Create Kind cluster (Kubernetes 1.34.3)
         uses: helm/kind-action@v1
@@ -270,19 +254,42 @@ jobs:
         with:
           kubectl_version: "1.34.3"
 
-      - name: Namespace, secret and ephemeral deps
+      - name: Namespace, deployment-configuration profile and ephemeral deps
         env:
-          SECRET_DOTENV: ${{ steps.sops.outputs.data }}
+          # Surfaced via env (not `secrets`) so a shell can test it; empty on a
+          # fork PR without the key, in which case the profile decrypt is skipped.
+          SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
+          PROFILE: ${{ inputs.profile }}
         run: |
           set -e
           kubectl create namespace "$NS" --dry-run=client -o yaml | kubectl apply -f -
-          if [ -n "${SECRET_NAME:-}" ] && [ -n "${SECRET_DOTENV:-}" ]; then
-            printf '%s\n' "$SECRET_DOTENV" > /tmp/secret.env
-            kubectl create secret generic "$SECRET_NAME" -n "$NS" --from-env-file=/tmp/secret.env \
-              --dry-run=client -o yaml | kubectl apply -f -
-            rm -f /tmp/secret.env
-            echo "created secret $SECRET_NAME"
+
+          # Apply the first customization (kustomization.yaml) under the selected
+          # profile environment — it defines the app's config + secret with the
+          # names the chart consumes (nothing hardcoded here). SOPS-encrypted
+          # *.secrets.env are decrypted in place first; skipped without a key.
+          PROFILE_ROOT="deployment-configuration/profiles/${PROFILE}"
+          KUST="$(find "$PROFILE_ROOT" -name kustomization.yaml 2>/dev/null | sort | head -1 || true)"
+          if [ -n "$KUST" ]; then
+            PROFILE_DIR="$(dirname "$KUST")"
+            echo "Applying profile customization: $PROFILE_DIR"
+            if [ -n "${SOPS_AGE_KEY:-}" ]; then
+              curl -fsSL -o /tmp/sops https://github.com/getsops/sops/releases/download/v3.9.1/sops-v3.9.1.linux.amd64
+              chmod +x /tmp/sops
+              printf '%s' "$SOPS_AGE_KEY" > /tmp/age.key
+              for f in $(find "$PROFILE_DIR" -maxdepth 1 -name '*.secrets.env' 2>/dev/null); do
+                echo "decrypting $f"
+                SOPS_AGE_KEY_FILE=/tmp/age.key /tmp/sops --decrypt "$f" > "$f.dec" && mv "$f.dec" "$f"
+              done
+              rm -f /tmp/age.key
+            else
+              echo "SOPS_AGE_KEY not set — skipping secret decrypt (fork PR)."
+            fi
+            kubectl apply -k "$PROFILE_DIR"
+          else
+            echo "No kustomization under $PROFILE_ROOT — no config/secret to apply."
           fi
+
           if [ -d hack/ci-deps ]; then
             kubectl apply -n "$NS" -f hack/ci-deps/
             kubectl wait --for=condition=available deploy --all -n "$NS" --timeout=180s || true
