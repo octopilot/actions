@@ -1,0 +1,139 @@
+name: Octopilot Pipeline
+
+# Reusable "meta" pipeline: the generic Octopilot build DAG that any repo can
+# adopt with a ~5-line caller. The application shape (languages, services,
+# charts) is auto-detected from skaffold.yaml by detect-contexts, so this file
+# is language- and repo-agnostic — the topology is invariant and only the
+# matrices vary per repo.
+#
+# Fork-safe by construction: integration images/charts are pushed to ttl.sh
+# (anonymous, namespace-free), so a fork's PR builds and pushes in the fork's
+# own space with no upstream credentials. Callers pass `secrets: inherit` so any
+# secret-dependent downstream job (e.g. a deploy) runs against the fork's own
+# secrets, or is skipped when absent.
+#
+# Consume it from a caller with:
+#   jobs:
+#     build:
+#       uses: octopilot/actions/.github/workflows/pipeline.yml@v1
+#       secrets: inherit
+# then add repo-specific jobs (deploy, release) that `needs: build` and download
+# the `integration-*` artifacts this workflow uploads.
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: Runner label for all jobs.
+        type: string
+        default: ubuntu-latest
+      op_version:
+        description: Octopilot `op` builder image version for artifact builds.
+        type: string
+        default: v1.0.17
+      actions_ref:
+        description: >
+          Ref of octopilot/actions the composite steps resolve to. Defaults to
+          main; pin (e.g. v1) alongside the reusable workflow for reproducibility.
+        type: string
+        default: main
+    outputs:
+      pipeline-context:
+        description: Detected pipeline context (JSON) from detect-contexts.
+        value: ${{ jobs.detect.outputs.pipeline-context }}
+      uuid:
+        description: ttl.sh UUID naming the ephemeral integration artifacts.
+        value: ${{ jobs.integration-validate.outputs.uuid }}
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  # ── 1. Auto-detect languages and versions from skaffold.yaml ───────────────
+  detect:
+    name: Detect Contexts
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      pipeline-context: ${{ steps.detect.outputs.pipeline-context }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Detect Contexts
+        id: detect
+        uses: octopilot/actions/detect-contexts@main
+
+  # ── 2. Lint (pre-commit, language-aware) ───────────────────────────────────
+  lint:
+    needs: detect
+    if: toJSON(fromJson(needs.detect.outputs.pipeline-context).languages) != '[]'
+    name: Lint
+    runs-on: ${{ inputs.runner }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: octopilot/actions/lint@main
+        with:
+          pipeline-context: ${{ needs.detect.outputs.pipeline-context }}
+
+  # ── 3. Test (matrix per detected language context) ─────────────────────────
+  test:
+    needs: detect
+    if: toJSON(fromJson(needs.detect.outputs.pipeline-context).matrix) != '[]'
+    name: Test
+    runs-on: ${{ inputs.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.detect.outputs.pipeline-context).matrix }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: octopilot/actions/test@main
+        with:
+          pipeline-context: ${{ toJson(matrix) }}
+
+  # ── 4a. Integration validate (release build + UUID for ttl.sh artifacts) ───
+  integration-validate:
+    name: Integration (validate)
+    needs: [detect, lint, test]
+    runs-on: ${{ inputs.runner }}
+    outputs:
+      uuid: ${{ steps.validate.outputs.uuid }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate primary build and generate UUID
+        id: validate
+        uses: octopilot/actions/integration-validate@main
+        with:
+          pipeline-context: ${{ needs.detect.outputs.pipeline-context }}
+
+  # ── 4b. Integration artifacts (matrix from skaffold build.artifacts + chart) ─
+  integration-artifacts:
+    name: Integration (${{ matrix.suffix || matrix.output_key }})
+    needs: [detect, integration-validate]
+    if: toJSON(fromJson(needs.detect.outputs.pipeline-context).integration_matrix) != '[]'
+    runs-on: ${{ inputs.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.detect.outputs.pipeline-context).integration_matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and push artifact
+        id: build
+        uses: octopilot/actions/integration-build-artifact@main
+        with:
+          artifact: ${{ toJson(matrix) }}
+          ttl-uuid: ${{ needs.integration-validate.outputs.uuid }}
+          op_version: ${{ inputs.op_version }}
+
+      - name: Upload artifact outputs
+        run: |
+          mkdir -p artifact-out
+          mv outputs.txt "artifact-out/${{ matrix.output_key }}.txt" 2>/dev/null || true
+          [ -f build_result.json ] && cp build_result.json artifact-out/ || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: integration-${{ matrix.output_key }}
+          path: artifact-out
+          retention-days: 1
