@@ -76,6 +76,12 @@ runs:
         if [ -z "$VERSION" ]; then
           VERSION="${GITHUB_REF_NAME}"
         fi
+        # Sanitize for use as a container image tag. On pull_request events
+        # GITHUB_REF_NAME is like "71/merge"; '/' (and other characters) are
+        # invalid in a Docker tag and make op emit an unparseable image
+        # reference (e.g. ttl.sh/<uuid>-api:1d71/merge). Replace any character
+        # that is not [A-Za-z0-9_.-] with '-'.
+        VERSION="$(printf '%s' "$VERSION" | sed 's/[^A-Za-z0-9_.-]/-/g')"
 
         # Create SBOM output directory
         mkdir -p "${INPUT_SBOM_OUTPUT}"
