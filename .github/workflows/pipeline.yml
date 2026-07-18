@@ -227,7 +227,9 @@ jobs:
           # IMG_<sanitized-image-name> for every non-chart image (envsubst input).
           jq -r '.builds[] | select((.imageName|test("-chart$"))|not) | "\(.imageName)\t\(.tag)"' build_result.json \
           | while IFS="$(printf '\t')" read -r name tag; do
-              var="IMG_$(basename "$name" | tr -c 'A-Za-z0-9' '_')"
+              short="$(basename "$name")"
+              # printf (not echo) so no trailing newline is turned into a "_".
+              var="IMG_$(printf '%s' "$short" | tr -c 'A-Za-z0-9' '_')"
               echo "$var=$tag" >> "$GITHUB_ENV"
               echo "resolved $var=$tag"
             done
@@ -242,13 +244,17 @@ jobs:
           fi
           echo "namespace=$NS  chart=$CHART_NAME  chart_ref=$CHART_REF"
 
+      # Gate only on the file — a secret's presence cannot be tested in `if:`
+      # (secret-derived env is masked to empty there). continue-on-error lets a
+      # fork PR without SOPS_AGE_KEY proceed (no secret created).
       - name: Decrypt runtime secret (SOPS + age)
         id: sops
-        if: ${{ env.SECRETS_FILE != '' && env.SOPS_AGE_KEY != '' }}
+        if: ${{ env.SECRETS_FILE != '' }}
+        continue-on-error: true
         uses: octopilot/actions/sops-decrypt@main
         with:
           file: ${{ env.SECRETS_FILE }}
-          age_key: ${{ env.SOPS_AGE_KEY }}
+          age_key: ${{ secrets.SOPS_AGE_KEY }}
           output_type: dotenv
 
       - name: Create Kind cluster (Kubernetes 1.34.3)
