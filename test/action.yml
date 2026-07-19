@@ -166,12 +166,17 @@ runs:
       env:
         CUSTOM_CMD: ${{ steps.ctx.outputs.command }}
       run: |
+        # Per-context venv (named .venv so tool default-excludes apply); never
+        # install into the runner's global environment.
+        python -m venv .venv
+        source .venv/bin/activate
+        python -m pip install --upgrade pip --quiet
         if [ -f pyproject.toml ]; then
           pip install -e ".[dev]" 2>/dev/null || pip install -e . 2>/dev/null || true
         elif [ -f requirements.txt ]; then
           pip install -r requirements.txt
         fi
-        pip install pytest-cov coverage
+        pip install pytest pytest-cov coverage
         mkdir -p "$GITHUB_WORKSPACE/coverage"
         if [ -z "$CUSTOM_CMD" ]; then
           pytest --cov=. --cov-report=xml:$GITHUB_WORKSPACE/coverage/coverage.xml --cov-report=lcov:$GITHUB_WORKSPACE/coverage/lcov.info -q

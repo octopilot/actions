@@ -263,23 +263,32 @@ def build_matrix_include(artifacts: list[dict], repo_root: str) -> list[dict]:
     not N identical ones.
     """
     matrix_include: list[dict] = []
-    seen: set[tuple[str, str]] = set()
+    entry_by_key: dict[tuple[str, str], dict] = {}
     for artifact in artifacts:
         image = artifact.get("image")
         context = artifact.get("context", ".")
+        env = artifact_env(artifact)
         context_abs = os.path.normpath(os.path.join(repo_root, context))
-        probe_dir = effective_context(context_abs, artifact_env(artifact))
+        probe_dir = effective_context(context_abs, env)
         info = detect_project_info(probe_dir)
         if info:
             language = info["language"]
             version = info["version"] or ""
             key = (str(language), probe_dir)
-            if key in seen:
+            entry = entry_by_key.get(key)
+            if entry is None:
+                sys.stderr.write(f"Detected {language} ({version}) for {image} in {context}\n")
+                entry = {"name": image, "context": context, "language": language, "version": version}
+                entry_by_key[key] = entry
+                matrix_include.append(entry)
+            else:
                 sys.stderr.write(f"Deduped {language} context for {image} ({probe_dir} already covered)\n")
-                continue
-            seen.add(key)
-            sys.stderr.write(f"Detected {language} ({version}) for {image} in {context}\n")
-            matrix_include.append({"name": image, "context": context, "language": language, "version": version})
+            # A context's test command may be declared (BP_TEST_COMMAND) on ANY
+            # artifact sharing that context — -lib artifacts are the natural
+            # home. The test action honors matrix.command over its default.
+            if env.get("BP_TEST_COMMAND") and not entry.get("command"):
+                entry["command"] = env["BP_TEST_COMMAND"]
+                sys.stderr.write(f"Test command override for {entry['name']}: {entry['command']}\n")
         else:
             sys.stderr.write(f"Could not detect language for {image} in {context}\n")
     return matrix_include
@@ -376,8 +385,11 @@ def build_deliverables_matrix(artifacts: list[dict], repo_root: str) -> list[dic
             "output_key": f"{function}_{short}",
             "publish": publish,
         }
-        if env:
-            entry["build_env"] = " ".join(f"{k}={v}" for k, v in env.items())
+        # BP_TEST_COMMAND (may contain spaces) belongs to the lint/test matrix,
+        # not the deliverable's space-joined build_env.
+        env_out = {k: v for k, v in env.items() if k != "BP_TEST_COMMAND"}
+        if env_out:
+            entry["build_env"] = " ".join(f"{k}={v}" for k, v in env_out.items())
         sys.stderr.write(
             f"Deliverable {function} ({entry['language'] or 'unknown'}) for {image} in {context} (publish={publish})\n"
         )

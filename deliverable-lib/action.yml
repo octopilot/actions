@@ -34,6 +34,11 @@ runs:
         # BP_RUST_WORKSPACE_DIR (relative to context) selects a nested workspace
         WS="$(printf '%s\n' $BUILD_ENV | sed -n 's/^BP_RUST_WORKSPACE_DIR=//p' | head -1)"
         echo "workspace_dir=${WS:-.}" >> "$GITHUB_OUTPUT"
+        # BP_LIB_PACKAGES=<pkg>[,<pkg>...] scopes the rust verify to specific
+        # workspace members (e.g. when some members are known-broken or covered
+        # elsewhere); empty = whole workspace.
+        PKGS="$(printf '%s\n' $BUILD_ENV | sed -n 's/^BP_LIB_PACKAGES=//p' | head -1)"
+        echo "packages=$PKGS" >> "$GITHUB_OUTPUT"
 
     # ── Rust ──────────────────────────────────────────────────────────────────
     - name: Setup Rust
@@ -64,11 +69,18 @@ runs:
       run: |
         set -euo pipefail
         cd "${{ steps.ctx.outputs.workspace_dir }}"
-        echo "::group::cargo build --workspace"
-        cargo build --workspace
+        PKGS="${{ steps.ctx.outputs.packages }}"
+        SCOPE=(--workspace)
+        if [ -n "$PKGS" ]; then
+          SCOPE=()
+          IFS=',' read -ra P <<< "$PKGS"
+          for p in "${P[@]}"; do SCOPE+=(-p "$p"); done
+        fi
+        echo "::group::cargo build ${SCOPE[*]}"
+        cargo build "${SCOPE[@]}"
         echo "::endgroup::"
-        echo "::group::cargo test --workspace"
-        cargo test --workspace
+        echo "::group::cargo test ${SCOPE[*]}"
+        cargo test "${SCOPE[@]}"
         echo "::endgroup::"
 
     # ── Python ────────────────────────────────────────────────────────────────
@@ -86,7 +98,13 @@ runs:
       working-directory: ${{ steps.ctx.outputs.context }}
       run: |
         set -euo pipefail
-        python -m pip install --upgrade pip build >/dev/null
+        # Per-context venv (named .venv so ruff/pytest default excludes apply);
+        # never install into the runner's global environment.
+        echo "::group::create venv"
+        python -m venv .venv
+        source .venv/bin/activate
+        python -m pip install --upgrade pip build --quiet
+        echo "::endgroup::"
         echo "::group::install package (+dev extras if declared)"
         pip install -e ".[dev]" 2>/dev/null || pip install -e .
         echo "::endgroup::"
