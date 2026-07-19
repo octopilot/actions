@@ -39,6 +39,11 @@ runs:
         # elsewhere); empty = whole workspace.
         PKGS="$(printf '%s\n' $BUILD_ENV | sed -n 's/^BP_LIB_PACKAGES=//p' | head -1)"
         echo "packages=$PKGS" >> "$GITHUB_OUTPUT"
+        # BP_LIB_VERIFY=build|test (default test). `build` skips the test phase —
+        # use when the context's full suite already runs in the pipeline's Test
+        # job (BP_TEST_COMMAND) and re-running it here would be pure duplication.
+        VERIFY="$(printf '%s\n' $BUILD_ENV | sed -n 's/^BP_LIB_VERIFY=//p' | head -1)"
+        echo "verify=${VERIFY:-test}" >> "$GITHUB_OUTPUT"
 
     # ── Rust ──────────────────────────────────────────────────────────────────
     - name: Setup Rust
@@ -79,9 +84,13 @@ runs:
         echo "::group::cargo build ${SCOPE[*]}"
         cargo build "${SCOPE[@]}"
         echo "::endgroup::"
-        echo "::group::cargo test ${SCOPE[*]}"
-        cargo test "${SCOPE[@]}"
-        echo "::endgroup::"
+        if [ "${{ steps.ctx.outputs.verify }}" = "build" ]; then
+          echo "BP_LIB_VERIFY=build — test phase covered by the pipeline Test job; skipping cargo test"
+        else
+          echo "::group::cargo test ${SCOPE[*]}"
+          cargo test "${SCOPE[@]}"
+          echo "::endgroup::"
+        fi
 
     # ── Python ────────────────────────────────────────────────────────────────
     - name: Setup Python
