@@ -120,6 +120,45 @@ jobs:
         with:
           pipeline-context: ${{ toJson(matrix) }}
 
+  # ── 3b. Deliverables (non-image meta-build functions: lib, binary) ─────────
+  # Every-run verification phase for artifacts routed by reserved suffix
+  # (-lib, -bin). A lib with publish mode `none` delivers a verified rev — the
+  # git-consumed library model. Tag-gated publish phases land in a later phase.
+  deliverables:
+    name: Deliverable (${{ matrix.output_key }})
+    needs: detect
+    if: >-
+      toJSON(fromJson(needs.detect.outputs.pipeline-context).deliverables_matrix) != 'null' &&
+      toJSON(fromJson(needs.detect.outputs.pipeline-context).deliverables_matrix) != '[]'
+    runs-on: ${{ inputs.runner }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.detect.outputs.pipeline-context).deliverables_matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Verify lib deliverable
+        if: matrix.type == 'lib'
+        uses: octopilot/actions/deliverable-lib@main
+        with:
+          deliverable: ${{ toJson(matrix) }}
+
+      - name: Build binary deliverable
+        id: binary
+        if: matrix.type == 'binary'
+        uses: octopilot/actions/deliverable-binary@main
+        with:
+          deliverable: ${{ toJson(matrix) }}
+
+      - name: Upload binary dist
+        if: matrix.type == 'binary'
+        uses: actions/upload-artifact@v4
+        with:
+          name: deliverable-${{ matrix.output_key }}
+          path: ${{ steps.binary.outputs.dist-path }}
+          retention-days: 7
+
   # ── 4a. Integration validate (release build + UUID for ttl.sh artifacts) ───
   integration-validate:
     name: Integration (validate)

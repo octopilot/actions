@@ -1,0 +1,107 @@
+name: 'Deliverable: binary'
+description: >
+  Every-run phase of the `binary` meta-build function: release-build the
+  declared packages and assemble a dist/ directory (tarball + SHA256SUMS) ready
+  for a tag-gated GitHub release. Generalizes the hand-rolled release-binaries
+  jobs (e.g. fleetingdns). Receives a single entry from
+  pipeline-context.deliverables_matrix (type: binary). Packages are declared via
+  BP_BIN_PACKAGES=<pkg>[,<pkg>...] in the artifact's buildpacks.env.
+inputs:
+  deliverable:
+    description: >
+      A single matrix item (JSON string) from detect-contexts
+      pipeline-context.deliverables_matrix. Pass: deliverable: toJson(matrix)
+    required: true
+
+outputs:
+  dist-path:
+    description: Path to the assembled dist directory (tarball + SHA256SUMS).
+    value: ${{ steps.dist.outputs.dist-path }}
+
+runs:
+  using: "composite"
+  steps:
+    - name: Parse deliverable
+      id: ctx
+      shell: bash
+      env:
+        DELIVERABLE: ${{ inputs.deliverable }}
+      run: |
+        echo "language=$(echo "$DELIVERABLE" | jq -r '.language // ""')"  >> "$GITHUB_OUTPUT"
+        echo "version=$(echo "$DELIVERABLE"  | jq -r '.version  // ""')"  >> "$GITHUB_OUTPUT"
+        echo "context=$(echo "$DELIVERABLE"  | jq -r '.context  // "."')" >> "$GITHUB_OUTPUT"
+        echo "output_key=$(echo "$DELIVERABLE" | jq -r '.output_key // "bin"')" >> "$GITHUB_OUTPUT"
+        BUILD_ENV="$(echo "$DELIVERABLE" | jq -r '.build_env // ""')"
+        WS="$(printf '%s\n' $BUILD_ENV | sed -n 's/^BP_RUST_WORKSPACE_DIR=//p' | head -1)"
+        PKGS="$(printf '%s\n' $BUILD_ENV | sed -n 's/^BP_BIN_PACKAGES=//p' | head -1)"
+        echo "workspace_dir=${WS:-.}" >> "$GITHUB_OUTPUT"
+        echo "packages=$PKGS" >> "$GITHUB_OUTPUT"
+        if [ -z "$PKGS" ]; then
+          echo "::error::binary deliverable requires BP_BIN_PACKAGES=<pkg>[,<pkg>...] in buildpacks.env"
+          exit 1
+        fi
+
+    - name: Setup Rust
+      if: steps.ctx.outputs.language == 'rust'
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ steps.ctx.outputs.version || 'stable' }}
+
+    - name: Cache Cargo and rustup
+      if: steps.ctx.outputs.language == 'rust'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          ~/.rustup/
+          target/
+        key: ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-bin-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-bin-
+
+    - name: Release-build packages and assemble dist (rust)
+      id: dist
+      if: steps.ctx.outputs.language == 'rust'
+      shell: bash
+      working-directory: ${{ steps.ctx.outputs.context }}
+      run: |
+        set -euo pipefail
+        cd "${{ steps.ctx.outputs.workspace_dir }}"
+        IFS=',' read -ra PKGS <<< "${{ steps.ctx.outputs.packages }}"
+        ARGS=()
+        for p in "${PKGS[@]}"; do ARGS+=(-p "$p"); done
+        echo "::group::cargo build --release ${ARGS[*]}"
+        cargo build --release "${ARGS[@]}"
+        echo "::endgroup::"
+        OS="$(uname -s | tr '[:upper:]' '[:lower:]')"
+        ARCH="$(uname -m)"
+        KEY="${{ steps.ctx.outputs.output_key }}"
+        DIST="$(pwd)/dist"
+        STAGE="$DIST/${KEY}-${OS}-${ARCH}"
+        mkdir -p "$STAGE"
+        for p in "${PKGS[@]}"; do
+          # binary name: [[bin]] name usually equals package name (or _-normalized)
+          for cand in "target/release/$p" "target/release/$(echo "$p" | tr '-' '_')"; do
+            if [ -f "$cand" ]; then cp "$cand" "$STAGE/"; break; fi
+          done
+        done
+        FOUND=$(ls -1 "$STAGE" | wc -l)
+        if [ "$FOUND" -eq 0 ]; then
+          echo "::error::no release binaries found for packages: ${PKGS[*]}"
+          exit 1
+        fi
+        tar -C "$DIST" -czf "$DIST/${KEY}-${OS}-${ARCH}.tar.gz" "$(basename "$STAGE")"
+        rm -rf "$STAGE"
+        (cd "$DIST" && sha256sum ./*.tar.gz > SHA256SUMS.txt)
+        echo "dist-path=$DIST" >> "$GITHUB_OUTPUT"
+        ls -la "$DIST"
+
+    - name: Unsupported language
+      if: steps.ctx.outputs.language != 'rust'
+      shell: bash
+      run: |
+        echo "::error::deliverable-binary currently supports rust contexts; got '${{ steps.ctx.outputs.language }}'"
+        exit 1

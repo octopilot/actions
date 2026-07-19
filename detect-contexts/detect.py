@@ -207,17 +207,77 @@ def detect_project_info(context_path: str) -> dict[str, str | None] | None:
     return info
 
 
+# ── Meta-build functions ─────────────────────────────────────────────────────
+# skaffold build.artifacts entries are named OCI artifacts, not necessarily
+# images. Reserved image-name suffixes route an artifact to a non-image
+# meta-build function (the `-chart` precedent, handled by op itself):
+#   -lib  → lib     "build and test it all" for the declared context; the
+#                    deliverable is a verified rev (publish optional via
+#                    BP_LIB_PUBLISH=crates-io|pypi|github-release|none)
+#   -bin  → binary  release binaries (BP_BIN_PACKAGES), GH release on tags
+# Everything else (incl. -chart) stays an integration-matrix entry.
+RESERVED_DELIVERABLE_SUFFIXES = {"lib": "lib", "bin": "binary"}
+
+
+def artifact_env(artifact: dict) -> dict[str, str]:
+    """Parse an artifact's buildpacks.env (list/dict/str) into a dict."""
+    env = (artifact.get("buildpacks") or {}).get("env")
+    out: dict[str, str] = {}
+    if isinstance(env, dict):
+        out = {str(k): str(v) for k, v in env.items()}
+    elif isinstance(env, list):
+        for e in env:
+            if isinstance(e, str) and "=" in e:
+                k, v = e.split("=", 1)
+                out[k] = v
+    elif isinstance(env, str):
+        for e in env.split():
+            if "=" in e:
+                k, v = e.split("=", 1)
+                out[k] = v
+    return out
+
+
+def artifact_function(artifact: dict) -> str:
+    """Resolve the meta-build function for an artifact from its reserved image-name suffix."""
+    image = artifact.get("image", "") or ""
+    image_name = image.split("/")[-1].split(":")[0]
+    suffix = image_name.rsplit("-", 1)[-1] if "-" in image_name else ""
+    return RESERVED_DELIVERABLE_SUFFIXES.get(suffix, "image")
+
+
+def effective_context(context_abs: str, env: dict[str, str]) -> str:
+    """Directory whose marker files define the language — honors BP_RUST_WORKSPACE_DIR
+    (nested Cargo workspaces, e.g. a repo whose workspace root is `microservices/`)."""
+    ws = env.get("BP_RUST_WORKSPACE_DIR", "").strip()
+    if ws and ws != ".":
+        return os.path.normpath(os.path.join(context_abs, ws))
+    return context_abs
+
+
 def build_matrix_include(artifacts: list[dict], repo_root: str) -> list[dict]:
-    """Build the test/lint matrix from skaffold artifacts (language detection per context)."""
+    """Build the test/lint matrix from skaffold artifacts (language detection per context).
+
+    Entries are deduped on (language, effective context dir): N artifacts selecting
+    packages out of one workspace (BP_RUST_PACKAGE=...) yield one lint/test entry,
+    not N identical ones.
+    """
     matrix_include: list[dict] = []
+    seen: set[tuple[str, str]] = set()
     for artifact in artifacts:
         image = artifact.get("image")
         context = artifact.get("context", ".")
         context_abs = os.path.normpath(os.path.join(repo_root, context))
-        info = detect_project_info(context_abs)
+        probe_dir = effective_context(context_abs, artifact_env(artifact))
+        info = detect_project_info(probe_dir)
         if info:
             language = info["language"]
             version = info["version"] or ""
+            key = (str(language), probe_dir)
+            if key in seen:
+                sys.stderr.write(f"Deduped {language} context for {image} ({probe_dir} already covered)\n")
+                continue
+            seen.add(key)
             sys.stderr.write(f"Detected {language} ({version}) for {image} in {context}\n")
             matrix_include.append({"name": image, "context": context, "language": language, "version": version})
         else:
@@ -232,6 +292,10 @@ def build_integration_matrix(artifacts: list[dict], chart_paths: list[str], repo
         image = artifact.get("image", "")
         context = artifact.get("context", ".")
         if not image:
+            continue
+        # Non-image meta-build functions (-lib, -bin) are verified in the
+        # deliverables matrix — never pack/docker-built as images.
+        if artifact_function(artifact) != "image":
             continue
         image_name = image.split("/")[-1].split(":")[0]
         parts = image_name.split("-")
@@ -278,6 +342,49 @@ def build_integration_matrix(artifacts: list[dict], chart_paths: list[str], repo
     return integration_matrix
 
 
+def build_deliverables_matrix(artifacts: list[dict], repo_root: str) -> list[dict]:
+    """Build the deliverables matrix: non-image meta-build functions (lib, binary).
+
+    A `lib` deliverable's every-run phase is "build and test it all" for its context;
+    with publish mode `none` (default) the deliverable is the verified rev itself
+    (git-consumed library model). `binary` covers release binaries.
+    """
+    deliverables: list[dict] = []
+    for artifact in artifacts:
+        function = artifact_function(artifact)
+        if function == "image":
+            continue
+        image = artifact.get("image", "")
+        context = artifact.get("context", ".")
+        env = artifact_env(artifact)
+        context_abs = os.path.normpath(os.path.join(repo_root, context))
+        probe_dir = effective_context(context_abs, env)
+        info = detect_project_info(probe_dir) or {"language": None, "version": ""}
+        image_name = image.split("/")[-1].split(":")[0]
+        base = image_name.rsplit("-", 1)[0] or image_name
+        short = base.split("-")[-1]
+        if function == "lib":
+            publish = env.get("BP_LIB_PUBLISH", "none")
+        else:
+            publish = "github-release"
+        entry: dict = {
+            "type": function,
+            "image": image,
+            "context": context,
+            "language": info["language"] or "",
+            "version": info["version"] or "",
+            "output_key": f"{function}_{short}",
+            "publish": publish,
+        }
+        if env:
+            entry["build_env"] = " ".join(f"{k}={v}" for k, v in env.items())
+        sys.stderr.write(
+            f"Deliverable {function} ({entry['language'] or 'unknown'}) for {image} in {context} (publish={publish})\n"
+        )
+        deliverables.append(entry)
+    return deliverables
+
+
 def build_pipeline_context(config: dict, repo_root: str) -> dict:
     """
     Build the full pipeline context (matrix, languages, versions, chart_paths, integration_matrix).
@@ -291,6 +398,7 @@ def build_pipeline_context(config: dict, repo_root: str) -> dict:
         matrix_include.append({"name": name, "context": path, "language": "helm", "version": ""})
 
     integration_matrix = build_integration_matrix(artifacts, chart_paths, repo_root)
+    deliverables_matrix = build_deliverables_matrix(artifacts, repo_root)
 
     unique_langs_set: set[str] = set()
     for item in matrix_include:
@@ -320,6 +428,7 @@ def build_pipeline_context(config: dict, repo_root: str) -> dict:
         "versions": versions,
         "chart_paths": chart_paths,
         "integration_matrix": integration_matrix,
+        "deliverables_matrix": deliverables_matrix,
     }
 
 
@@ -358,6 +467,7 @@ def main() -> None:
             "versions": {},
             "chart_paths": [],
             "integration_matrix": [],
+            "deliverables_matrix": [],
         }
         write_outputs(empty_context, os.environ.get("GITHUB_OUTPUT"))
         return
