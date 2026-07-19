@@ -255,6 +255,97 @@ def effective_context(context_abs: str, env: dict[str, str]) -> str:
     return context_abs
 
 
+def synthesize_rust_test_command(context_dir: str) -> str | None:
+    """Archetype inference: some rust projects need more than a bare `cargo test`.
+
+    A BRRTRouter-based context (the BRRTRouter repo itself, or a service that
+    depends on it) is detected from its Cargo.toml, and the test ritual is
+    synthesized from cheap, observable signals:
+      * test sources referencing a musl target  -> provision musl toolchain
+        (BRRTRouter e2e harnesses cross-build the service and run it on Alpine)
+      * committed .cargo/config.toml rustflags  -> neutralize RUSTFLAGS
+        (parity with repos whose own CI overrides the config)
+      * brrtrouter-gen + examples/openapi.yaml  -> regenerate handlers pre-test
+    An explicitly declared BP_TEST_COMMAND always wins over this inference.
+    Returns None for non-BRRTRouter contexts (the test action's default runs).
+    """
+    cargo_content = get_file_content(context_dir, "Cargo.toml")
+    if not cargo_content:
+        return None
+    try:
+        cargo = tomllib.loads(cargo_content)
+    except Exception as e:
+        sys.stderr.write(f"Error parsing Cargo.toml in {context_dir}: {e}\n")
+        return None
+
+    pkg_name = cargo.get("package", {}).get("name", "")
+    bins = cargo.get("bin", []) or []
+    deps = dict(cargo.get("dependencies", {}) or {})
+    deps.update(cargo.get("workspace", {}).get("dependencies", {}) or {})
+    is_brrt_repo = pkg_name == "brrtrouter" or any(
+        isinstance(b, dict) and b.get("name") == "brrtrouter-gen" for b in bins
+    )
+    uses_brrt = "brrtrouter" in deps
+    if not (is_brrt_repo or uses_brrt):
+        return None
+
+    # Structural variant: workspace members in gen/impl pairs + an openapi/
+    # spec tree = a generated BRRTRouter microservice (gen crates committed;
+    # CI compiles them as-is and never regenerates — regen is a dev-time step).
+    members = cargo.get("workspace", {}).get("members", []) or []
+    has_gen_impl_pairs = any(str(m).endswith("/gen") for m in members) and any(
+        str(m).endswith("/impl") for m in members
+    )
+    is_brrt_service = uses_brrt and (
+        has_gen_impl_pairs or os.path.isdir(os.path.join(context_dir, "openapi"))
+    )
+    archetype = "brrtrouter-repo" if is_brrt_repo else (
+        "brrtrouter-service" if is_brrt_service else "brrtrouter-consumer"
+    )
+    sys.stderr.write(f"Rust archetype detected in {context_dir}: {archetype}\n")
+
+    parts: list[str] = []
+
+    # musl e2e harness: any test source referencing a musl target triple
+    musl = False
+    tests_dir = os.path.join(context_dir, "tests")
+    if os.path.isdir(tests_dir):
+        try:
+            for fn in sorted(os.listdir(tests_dir)):
+                if not fn.endswith(".rs"):
+                    continue
+                content = get_file_content(tests_dir, fn)
+                if content and "unknown-linux-musl" in content:
+                    musl = True
+                    break
+        except OSError:
+            pass
+    if musl:
+        parts.append("sudo apt-get update -qq && sudo apt-get install -y -qq musl-tools")
+        parts.append("rustup target add x86_64-unknown-linux-musl")
+
+    exports: list[str] = []
+    cargo_cfg = get_file_content(context_dir, os.path.join(".cargo", "config.toml"))
+    if cargo_cfg and "rustflags" in cargo_cfg:
+        exports.append("RUSTFLAGS=")
+    if musl:
+        exports.append("CC_x86_64_unknown_linux_musl=musl-gcc")
+        exports.append("CARGO_TARGET_X86_64_UNKNOWN_LINUX_MUSL_LINKER=musl-gcc")
+    if exports:
+        parts.append("export " + " ".join(exports))
+
+    # Spec-driven codegen: the BRRTRouter repo regenerates its example service
+    # from the OpenAPI spec before testing (generated code must match the spec).
+    if is_brrt_repo and os.path.isfile(os.path.join(context_dir, "examples", "openapi.yaml")):
+        parts.append("cargo run --bin brrtrouter-gen -- generate --spec examples/openapi.yaml --force")
+
+    parts.append(
+        'cargo llvm-cov test --workspace --all-targets --no-fail-fast '
+        '--lcov --output-path "$GITHUB_WORKSPACE/coverage/lcov.info"'
+    )
+    return " && ".join(parts)
+
+
 def build_matrix_include(artifacts: list[dict], repo_root: str) -> list[dict]:
     """Build the test/lint matrix from skaffold artifacts (language detection per context).
 
@@ -291,6 +382,16 @@ def build_matrix_include(artifacts: list[dict], repo_root: str) -> list[dict]:
                 sys.stderr.write(f"Test command override for {entry['name']}: {entry['command']}\n")
         else:
             sys.stderr.write(f"Could not detect language for {image} in {context}\n")
+
+    # Archetype inference (declared BP_TEST_COMMAND always wins): rust contexts
+    # without a declared command may still need more than a bare `cargo test` —
+    # synthesize the ritual from observable signals (see synthesize_rust_test_command).
+    for key, entry in entry_by_key.items():
+        if entry.get("language") == "rust" and not entry.get("command"):
+            synthesized = synthesize_rust_test_command(key[1])
+            if synthesized:
+                entry["command"] = synthesized
+                sys.stderr.write(f"Synthesized test command for {entry['name']}: {synthesized}\n")
     return matrix_include
 
 
