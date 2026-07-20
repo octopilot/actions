@@ -213,7 +213,23 @@ jobs:
           MATRIX_IMAGE: ${{ matrix.image }}
         run: |
           base="$(basename "${MATRIX_IMAGE%%:*}")"
-          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER}/${base}-buildcache" >> "$GITHUB_OUTPUT"
+          img="ghcr.io/${GITHUB_REPOSITORY_OWNER}/${base}-buildcache"
+          # GHCR chicken-and-egg: the lifecycle RESTORES (pulls) the cache
+          # image before it ever exports one, and GITHUB_TOKEN gets DENIED
+          # (not 404) pulling a package that has never existed — fatal to the
+          # build. Bootstrap: push a tiny placeholder so the package exists
+          # with the repo association; the lifecycle treats a metadata-less
+          # cache image as empty and overwrites it on first export.
+          if ! docker manifest inspect "$img:latest" >/dev/null 2>&1; then
+            echo "Bootstrapping build-cache package (first run): $img"
+            printf 'octopilot buildcache bootstrap' | docker import - "$img:latest" >/dev/null
+            if ! docker push "$img:latest" >/dev/null 2>&1; then
+              echo "::warning::build-cache bootstrap push failed for $img — building without cache this run"
+              echo "image=" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          fi
+          echo "image=$img" >> "$GITHUB_OUTPUT"
 
       - name: Build and push artifact
         id: build
