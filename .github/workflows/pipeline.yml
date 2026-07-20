@@ -190,6 +190,12 @@ jobs:
     needs: [detect, integration-validate]
     if: toJSON(fromJson(needs.detect.outputs.pipeline-context).integration_matrix) != '[]'
     runs-on: ${{ inputs.runner }}
+    # packages:write lets the job push the pack build-cache image to GHCR
+    # (warm buildpack caches across ephemeral runners). Other permissions
+    # revert to restrictive defaults once any permission is declared.
+    permissions:
+      contents: read
+      packages: write
     # Hard cap — a hung test must fail the job, not burn 6h of runner time.
     timeout-minutes: 45
     strategy:
@@ -199,6 +205,25 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Pack build-cache as a GHCR image: push events only — fork PRs have no
+      # write token, and the cache needs a STABLE name across runs (ttl.sh's
+      # per-run UUIDs are useless for caching). Old op versions ignore the
+      # cache image harmlessly; op v1.0.18+ restores/exports it.
+      - name: Login to GHCR for build cache
+        if: github.event_name == 'push' && matrix.type == 'image'
+        shell: bash
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Derive build-cache image name
+        id: cache
+        if: github.event_name == 'push' && matrix.type == 'image'
+        shell: bash
+        env:
+          MATRIX_IMAGE: ${{ matrix.image }}
+        run: |
+          base="$(basename "${MATRIX_IMAGE%%:*}")"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER}/${base}-buildcache" >> "$GITHUB_OUTPUT"
+
       - name: Build and push artifact
         id: build
         uses: octopilot/actions/integration-build-artifact@main
@@ -206,6 +231,7 @@ jobs:
           artifact: ${{ toJson(matrix) }}
           ttl-uuid: ${{ needs.integration-validate.outputs.uuid }}
           op_version: ${{ inputs.op_version }}
+          cache_image: ${{ steps.cache.outputs.image || '' }}
 
       - name: Upload artifact outputs
         run: |

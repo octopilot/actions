@@ -25,6 +25,14 @@ inputs:
     description: 'When set (e.g. tcp://host.docker.internal:2375), op uses this DOCKER_HOST. Use with job-level DinD service when the runner has no Docker socket (required for chart builds).'
     required: false
     default: ''
+  cache_image:
+    description: >
+      Registry image for the pack BUILD cache (e.g.
+      ghcr.io/org/myimage-buildcache). Only applied to image artifacts. The
+      caller must have already docker-logged-in with push access; leave empty
+      on fork PRs. Requires op v1.0.18+ (older op ignores it harmlessly).
+    required: false
+    default: ''
 runs:
   using: "composite"
   steps:
@@ -56,6 +64,7 @@ runs:
         artifact: ${{ steps.parse.outputs.image }}
         op_version: ${{ inputs.op_version }}
         docker_host: ${{ inputs.docker_host }}
+        cache_image: ${{ inputs.cache_image }}
 
     - name: Build and push chart (Octopilot)
       id: chart_build
