@@ -1,0 +1,115 @@
+name: 'Deliverable: lib'
+description: >
+  Every-run phase of the `lib` meta-build function: "build and test it all" for
+  one declared library context. Receives a single entry from
+  pipeline-context.deliverables_matrix (type: lib). With publish mode `none`
+  (default) the deliverable is the verified rev itself — the git-consumed
+  library model. Publish phases (crates-io / pypi / github-release) are
+  tag-gated and handled separately.
+inputs:
+  deliverable:
+    description: >
+      A single matrix item (JSON string) from detect-contexts
+      pipeline-context.deliverables_matrix. Contains: type, image, context,
+      language, version, output_key, publish, and optionally build_env.
+      In the calling workflow pass: deliverable: toJson(matrix)
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    # ── Parse JSON into individual step outputs ───────────────────────────────
+    - name: Parse deliverable
+      id: ctx
+      shell: bash
+      env:
+        DELIVERABLE: ${{ inputs.deliverable }}
+      run: |
+        echo "language=$(echo "$DELIVERABLE" | jq -r '.language // ""')"  >> "$GITHUB_OUTPUT"
+        echo "version=$(echo "$DELIVERABLE"  | jq -r '.version  // ""')"  >> "$GITHUB_OUTPUT"
+        echo "context=$(echo "$DELIVERABLE"  | jq -r '.context  // "."')" >> "$GITHUB_OUTPUT"
+        echo "publish=$(echo "$DELIVERABLE"  | jq -r '.publish  // "none"')" >> "$GITHUB_OUTPUT"
+        BUILD_ENV="$(echo "$DELIVERABLE" | jq -r '.build_env // ""')"
+        echo "build_env=$BUILD_ENV" >> "$GITHUB_OUTPUT"
+        # BP_RUST_WORKSPACE_DIR (relative to context) selects a nested workspace
+        WS="$(printf '%s\n' $BUILD_ENV | sed -n 's/^BP_RUST_WORKSPACE_DIR=//p' | head -1)"
+        echo "workspace_dir=${WS:-.}" >> "$GITHUB_OUTPUT"
+
+    # ── Rust ──────────────────────────────────────────────────────────────────
+    - name: Setup Rust
+      if: steps.ctx.outputs.language == 'rust'
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ steps.ctx.outputs.version || 'stable' }}
+
+    - name: Cache Cargo and rustup
+      if: steps.ctx.outputs.language == 'rust'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          ~/.rustup/
+          target/
+        key: ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-lib-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-lib-
+
+    - name: Build and test (rust)
+      if: steps.ctx.outputs.language == 'rust'
+      shell: bash
+      working-directory: ${{ steps.ctx.outputs.context }}
+      run: |
+        set -euo pipefail
+        cd "${{ steps.ctx.outputs.workspace_dir }}"
+        echo "::group::cargo build --workspace"
+        cargo build --workspace
+        echo "::endgroup::"
+        echo "::group::cargo test --workspace"
+        cargo test --workspace
+        echo "::endgroup::"
+
+    # ── Python ────────────────────────────────────────────────────────────────
+    - name: Setup Python
+      if: steps.ctx.outputs.language == 'python'
+      uses: actions/setup-python@v5
+      with:
+        # requires-python ranges (e.g. ">=3.10") are not valid inputs; use a
+        # floor extracted from the range, else a modern default.
+        python-version: '3.12'
+
+    - name: Build and test (python)
+      if: steps.ctx.outputs.language == 'python'
+      shell: bash
+      working-directory: ${{ steps.ctx.outputs.context }}
+      run: |
+        set -euo pipefail
+        python -m pip install --upgrade pip build >/dev/null
+        echo "::group::install package (+dev extras if declared)"
+        pip install -e ".[dev]" 2>/dev/null || pip install -e .
+        echo "::endgroup::"
+        if command -v ruff >/dev/null 2>&1; then
+          echo "::group::ruff check"
+          ruff check .
+          echo "::endgroup::"
+        fi
+        if ls tests/ >/dev/null 2>&1 || ls test_*.py >/dev/null 2>&1; then
+          echo "::group::pytest"
+          python -m pytest
+          echo "::endgroup::"
+        else
+          echo "No tests found — skipping pytest"
+        fi
+        echo "::group::build wheel + sdist (sanity)"
+        python -m build
+        echo "::endgroup::"
+
+    # ── Anything else declared as -lib is a config error ──────────────────────
+    - name: Unsupported language
+      if: steps.ctx.outputs.language != 'rust' && steps.ctx.outputs.language != 'python'
+      shell: bash
+      run: |
+        echo "::error::deliverable-lib supports rust and python contexts; got '${{ steps.ctx.outputs.language }}' for context '${{ steps.ctx.outputs.context }}'"
+        exit 1

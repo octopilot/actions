@@ -30,7 +30,7 @@ on:
       op_version:
         description: Octopilot `op` builder image version for artifact builds.
         type: string
-        default: v1.1.2
+        default: v1.0.17
       actions_ref:
         description: >
           Ref of octopilot/actions the composite steps resolve to. Defaults to
@@ -108,16 +108,11 @@ jobs:
         with:
           pipeline-context: ${{ needs.detect.outputs.pipeline-context }}
 
-  # ── 3. Test + Deliverables (one dynamic matrix from detect-contexts) ───────
-  # The DAG renders exactly the legs that exist: detect-contexts emits every
-  # entry with `kind` (test | deliverable) and a human `job_label`, and this
-  # job dispatches per-entry. A repo without deliverables simply has no
-  # deliverable legs — no ghost "skipped" node to raise eyebrows — and job
-  # names never leak long synthesized commands.
+  # ── 3. Test (matrix per detected language context) ─────────────────────────
   test:
     needs: detect
     if: toJSON(fromJson(needs.detect.outputs.pipeline-context).matrix) != '[]'
-    name: ${{ matrix.job_label || 'Test' }}
+    name: Test
     runs-on: ${{ inputs.runner }}
     # Hard cap — a hung test must fail the job, not burn 6h of runner time.
     timeout-minutes: 60
@@ -127,31 +122,45 @@ jobs:
         include: ${{ fromJson(needs.detect.outputs.pipeline-context).matrix }}
     steps:
       - uses: actions/checkout@v4
-
-      - name: Run tests
-        if: matrix.kind != 'deliverable'
-        uses: octopilot/actions/test@main
+      - uses: octopilot/actions/test@main
         with:
           pipeline-context: ${{ toJson(matrix) }}
 
-      # Deliverable legs (meta-build functions routed by reserved suffix):
-      # lib = "build and test it all" / verified rev; binary = release
-      # binaries + dist assembly. Tag-gated publishing lands in a later phase.
+  # ── 3b. Deliverables (non-image meta-build functions: lib, binary) ─────────
+  # Every-run verification phase for artifacts routed by reserved suffix
+  # (-lib, -bin). A lib with publish mode `none` delivers a verified rev — the
+  # git-consumed library model. Tag-gated publish phases land in a later phase.
+  deliverables:
+    name: Deliverable (${{ matrix.output_key }})
+    needs: detect
+    if: >-
+      toJSON(fromJson(needs.detect.outputs.pipeline-context).deliverables_matrix) != 'null' &&
+      toJSON(fromJson(needs.detect.outputs.pipeline-context).deliverables_matrix) != '[]'
+    runs-on: ${{ inputs.runner }}
+    # Hard cap — a hung test must fail the job, not burn 6h of runner time.
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJson(needs.detect.outputs.pipeline-context).deliverables_matrix }}
+    steps:
+      - uses: actions/checkout@v4
+
       - name: Verify lib deliverable
-        if: matrix.kind == 'deliverable' && matrix.type == 'lib'
+        if: matrix.type == 'lib'
         uses: octopilot/actions/deliverable-lib@main
         with:
           deliverable: ${{ toJson(matrix) }}
 
       - name: Build binary deliverable
         id: binary
-        if: matrix.kind == 'deliverable' && matrix.type == 'binary'
+        if: matrix.type == 'binary'
         uses: octopilot/actions/deliverable-binary@main
         with:
           deliverable: ${{ toJson(matrix) }}
 
       - name: Upload binary dist
-        if: matrix.kind == 'deliverable' && matrix.type == 'binary'
+        if: matrix.type == 'binary'
         uses: actions/upload-artifact@v4
         with:
           name: deliverable-${{ matrix.output_key }}
@@ -196,47 +205,24 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Pack build-cache as a GHCR image: push + workflow_dispatch only — fork
-      # PRs have no write token, and the cache needs a STABLE name across runs
-      # (ttl.sh's per-run UUIDs are useless for caching). Old op versions
-      # ignore the cache image harmlessly; op v1.0.18+ restores/exports it.
+      # Pack build-cache as a GHCR image: push events only — fork PRs have no
+      # write token, and the cache needs a STABLE name across runs (ttl.sh's
+      # per-run UUIDs are useless for caching). Old op versions ignore the
+      # cache image harmlessly; op v1.0.18+ restores/exports it.
       - name: Login to GHCR for build cache
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && matrix.type == 'image'
+        if: github.event_name == 'push' && matrix.type == 'image'
         shell: bash
         run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Derive build-cache image name
         id: cache
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && matrix.type == 'image'
+        if: github.event_name == 'push' && matrix.type == 'image'
         shell: bash
         env:
           MATRIX_IMAGE: ${{ matrix.image }}
         run: |
           base="$(basename "${MATRIX_IMAGE%%:*}")"
-          img="ghcr.io/${GITHUB_REPOSITORY_OWNER}/${base}-buildcache"
-          # GHCR chicken-and-egg: the lifecycle RESTORES (pulls) the cache
-          # image before it ever exports one, and GITHUB_TOKEN gets DENIED
-          # (not 404) pulling a package that has never existed — fatal to the
-          # build. Bootstrap: push a tiny placeholder so the package exists
-          # with the repo association; the lifecycle treats a metadata-less
-          # cache image as empty and overwrites it on first export.
-          # docker import needs a REAL tar stream (raw text -> "unexpected
-          # EOF"), and the whole bootstrap is best-effort: any failure
-          # degrades to a cacheless build instead of failing the job.
-          if ! docker manifest inspect "$img:latest" >/dev/null 2>&1; then
-            echo "Bootstrapping build-cache package (first run): $img"
-            stage="$(mktemp -d)"
-            echo 'octopilot buildcache bootstrap' > "$stage/.octopilot-buildcache-bootstrap"
-            if ! { tar -C "$stage" -cf - . | docker import - "$img:latest" >/dev/null \
-                   && docker push "$img:latest" >/dev/null 2>&1; }; then
-              echo "::warning::build-cache bootstrap failed for $img — building without cache this run"
-              echo "image=" >> "$GITHUB_OUTPUT"
-              rm -rf "$stage"
-              exit 0
-            fi
-            rm -rf "$stage"
-          fi
-          echo "image=$img" >> "$GITHUB_OUTPUT"
+          echo "image=ghcr.io/${GITHUB_REPOSITORY_OWNER}/${base}-buildcache" >> "$GITHUB_OUTPUT"
 
       - name: Build and push artifact
         id: build
@@ -393,17 +379,8 @@ jobs:
           fi
 
           if [ -d hack/ci-deps ]; then
-            # ci-deps manifests are SELF-DESCRIBING: each object must declare
-            # metadata.namespace explicitly. No -n flag here — kubectl refuses
-            # objects whose declared namespace differs from -n, which breaks
-            # legitimate cross-namespace shims (e.g. an ExternalName Service
-            # aliasing a production-shaped hostname into the app namespace).
-            # See docs/ECOSYSTEM-AND-DEPENDENCIES.md.
-            kubectl apply -f hack/ci-deps/
-            # Readiness: wait on the app namespace, plus any ci-deps-labelled
-            # deployments in other namespaces (tier: ci-deps convention).
+            kubectl apply -n "$NS" -f hack/ci-deps/
             kubectl wait --for=condition=available deploy --all -n "$NS" --timeout=180s || true
-            kubectl wait --for=condition=available deploy -A -l tier=ci-deps --timeout=60s || true
           fi
 
       - name: Setup Flux in Kind

@@ -1,0 +1,301 @@
+name: 'Test'
+description: >
+  Runs tests for a single language context item. Receives one entry from the
+  pipeline-context matrix produced by detect-contexts, sets up the appropriate
+  toolchain, and executes the test command for that language.
+  The matrix fan-out (strategy.matrix) must be declared in the calling workflow;
+  this action handles the per-item setup and execution.
+inputs:
+  pipeline-context:
+    description: >
+      A single matrix item (JSON string) from detect-contexts
+      pipeline-context.matrix. Contains: language, version, context, name,
+      and optionally command.
+      In the calling workflow pass: pipeline-context: toJson(matrix)
+    required: true
+
+runs:
+  using: "composite"
+  steps:
+    # ── Parse JSON into individual step outputs ───────────────────────────────
+    # fromJson() is not permitted in composite action step `if:` conditions, so
+    # we extract all fields here and reference `steps.ctx.outputs.*` below.
+    - name: Parse context
+      id: ctx
+      shell: bash
+      env:
+        PIPELINE_CONTEXT: ${{ inputs['pipeline-context'] }}
+      run: |
+        echo "language=$(echo "$PIPELINE_CONTEXT"  | jq -r '.language')"         >> "$GITHUB_OUTPUT"
+        echo "version=$(echo "$PIPELINE_CONTEXT"   | jq -r '.version  // ""')"   >> "$GITHUB_OUTPUT"
+        echo "context=$(echo "$PIPELINE_CONTEXT"   | jq -r '.context  // "."')"  >> "$GITHUB_OUTPUT"
+        echo "command=$(echo "$PIPELINE_CONTEXT"   | jq -r '.command  // ""')"   >> "$GITHUB_OUTPUT"
+        NAME="$(echo "$PIPELINE_CONTEXT" | jq -r '.name // .context // "unknown"')"
+        echo "name=$NAME" >> "$GITHUB_OUTPUT"
+        SLUG="$(echo "$NAME" | sed 's/[^A-Za-z0-9._-]/-/g' | sed 's/^-*//;s/-*$//' | head -c 50)"
+        echo "name_slug=${SLUG:-unknown}" >> "$GITHUB_OUTPUT"
+
+    # ── Toolchain setup (one branch executes per matrix item) ─────────────────
+
+    - name: Setup Go
+      if: steps.ctx.outputs.language == 'go'
+      uses: actions/setup-go@v5
+      with:
+        go-version: ${{ steps.ctx.outputs.version || '1.24' }}
+
+    - name: Setup Rust
+      if: steps.ctx.outputs.language == 'rust'
+      uses: dtolnay/rust-toolchain@master
+      with:
+        toolchain: ${{ steps.ctx.outputs.version || 'stable' }}
+
+    # Cache Cargo registry, rustup toolchains/components, and build artefacts for Rust.
+    # Includes ~/.rustup/ so llvm-tools-preview and toolchain are reused across runs.
+    - name: Cache Cargo and rustup
+      if: steps.ctx.outputs.language == 'rust'
+      uses: actions/cache@v4
+      with:
+        path: |
+          ~/.cargo/bin/
+          ~/.cargo/registry/index/
+          ~/.cargo/registry/cache/
+          ~/.cargo/git/db/
+          ~/.rustup/
+          target/
+        key: ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+        restore-keys: |
+          ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-test-
+          ${{ runner.os }}-cargo-test-
+          ${{ runner.os }}-cargo-
+
+    - name: Setup Python
+      if: steps.ctx.outputs.language == 'python'
+      uses: actions/setup-python@v5
+      with:
+        python-version: ${{ steps.ctx.outputs.version || '3.12' }}
+
+    - name: Setup Node
+      if: steps.ctx.outputs.language == 'node'
+      uses: actions/setup-node@v4
+      with:
+        node-version: ${{ steps.ctx.outputs.version || '20' }}
+
+    - name: Setup Java
+      if: steps.ctx.outputs.language == 'java'
+      uses: actions/setup-java@v4
+      with:
+        distribution: temurin
+        java-version: ${{ steps.ctx.outputs.version || '17' }}
+
+    - name: Setup Helm
+      if: steps.ctx.outputs.language == 'helm'
+      shell: bash
+      run: |
+        if command -v helm &>/dev/null; then
+          echo "Helm already installed: $(helm version --short)"
+          exit 0
+        fi
+        HELM_VERSION="${HELM_VERSION:-3.16.4}"
+        curl -sSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz" | tar -xzf - -C /tmp
+        sudo mv /tmp/linux-amd64/helm /usr/local/bin/helm
+        helm version --short
+
+    - name: Create Kind cluster (Kubernetes 1.34.3)
+      if: steps.ctx.outputs.language == 'helm'
+      uses: helm/kind-action@v1
+      with:
+        version: v0.31.0
+        node_image: kindest/node:v1.34.3
+        cluster_name: helm-test
+        wait: 120s
+
+    # ── Test execution ─────────────────────────────────────────────────────────
+
+    - name: Run Tests (Go) with coverage
+      if: steps.ctx.outputs.language == 'go'
+      shell: bash
+      working-directory: ${{ steps.ctx.outputs.context }}
+      env:
+        CUSTOM_CMD: ${{ steps.ctx.outputs.command }}
+      run: |
+        mkdir -p "$GITHUB_WORKSPACE/coverage"
+        if [ -z "$CUSTOM_CMD" ]; then
+          go test -v -coverprofile="$GITHUB_WORKSPACE/coverage/coverage.out" -covermode=atomic ./...
+        else
+          eval "$CUSTOM_CMD"
+        fi
+
+    - name: Install cargo-llvm-cov (Rust coverage)
+      if: steps.ctx.outputs.language == 'rust'
+      shell: bash
+      run: |
+        rustup component add llvm-tools-preview
+        cargo install cargo-llvm-cov --locked --force 2>/dev/null || cargo install cargo-llvm-cov --force
+
+    - name: Install mold linker (Rust, Linux)
+      if: steps.ctx.outputs.language == 'rust' && runner.os == 'Linux'
+      shell: bash
+      run: |
+        sudo apt-get update -qq && sudo apt-get install -y mold
+
+    - name: Run Tests (Rust) with LLVM coverage
+      if: steps.ctx.outputs.language == 'rust'
+      shell: bash
+      working-directory: ${{ steps.ctx.outputs.context }}
+      env:
+        CUSTOM_CMD: ${{ steps.ctx.outputs.command }}
+        # Use workspace target dir so the cached target/ is always reused (same path for any context).
+        CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        # Incremental builds reuse cached artifacts (see https://medium.com/@premchandak_11/one-line-in-cargo-config-toml-made-my-rust-build-35-faster-6c91425a8f0a).
+        CARGO_BUILD_INCREMENTAL: true
+        # Faster linking on Linux when mold is installed (step above).
+        RUSTFLAGS: ${{ runner.os == 'Linux' && '-C link-arg=-fuse-ld=mold' || '' }}
+      run: |
+        mkdir -p "$GITHUB_WORKSPACE/coverage"
+        if [ -z "$CUSTOM_CMD" ]; then
+          cargo llvm-cov test --workspace --all-features --no-fail-fast --no-clean \
+            --lcov --output-path "$GITHUB_WORKSPACE/coverage/lcov.info"
+        else
+          eval "$CUSTOM_CMD"
+        fi
+
+    - name: Run Tests (Python) with coverage
+      if: steps.ctx.outputs.language == 'python'
+      shell: bash
+      working-directory: ${{ steps.ctx.outputs.context }}
+      env:
+        CUSTOM_CMD: ${{ steps.ctx.outputs.command }}
+      run: |
+        if [ -f pyproject.toml ]; then
+          pip install -e ".[dev]" 2>/dev/null || pip install -e . 2>/dev/null || true
+        elif [ -f requirements.txt ]; then
+          pip install -r requirements.txt
+        fi
+        pip install pytest-cov coverage
+        mkdir -p "$GITHUB_WORKSPACE/coverage"
+        if [ -z "$CUSTOM_CMD" ]; then
+          pytest --cov=. --cov-report=xml:$GITHUB_WORKSPACE/coverage/coverage.xml --cov-report=lcov:$GITHUB_WORKSPACE/coverage/lcov.info -q
+        else
+          eval "$CUSTOM_CMD"
+        fi
+
+    - name: Run Tests (Node) with coverage
+      if: steps.ctx.outputs.language == 'node'
+      shell: bash
+      working-directory: ${{ steps.ctx.outputs.context }}
+      env:
+        CUSTOM_CMD: ${{ steps.ctx.outputs.command }}
+      run: |
+        npm ci || npm install
+        mkdir -p "$GITHUB_WORKSPACE/coverage"
+        if [ -z "$CUSTOM_CMD" ]; then
+          npx c8 --reporter=lcov --reporter=text --output-dir="$GITHUB_WORKSPACE/coverage" npm test 2>/dev/null || \
+          npx nyc --reporter=lcov --reporter=text --report-dir="$GITHUB_WORKSPACE/coverage" npm test 2>/dev/null || \
+          npm test
+        else
+          eval "$CUSTOM_CMD"
+        fi
+
+    - name: Run Tests (Java / Kotlin) with coverage
+      if: steps.ctx.outputs.language == 'java'
+      shell: bash
+      working-directory: ${{ steps.ctx.outputs.context }}
+      env:
+        CUSTOM_CMD: ${{ steps.ctx.outputs.command }}
+      run: |
+        mkdir -p "$GITHUB_WORKSPACE/coverage"
+        if [ -n "$CUSTOM_CMD" ]; then
+          eval "$CUSTOM_CMD"
+        elif [ -f pom.xml ]; then
+          mvn test -B -q
+          if [ -d target/site/jacoco ]; then
+            cp -r target/site/jacoco/* "$GITHUB_WORKSPACE/coverage/" 2>/dev/null || true
+          fi
+        elif [ -f build.gradle.kts ] || [ -f build.gradle ]; then
+          if [ -f gradlew ]; then
+            ./gradlew test jacocoTestReport --no-daemon 2>/dev/null || ./gradlew test --no-daemon
+          else
+            gradle test jacocoTestReport --no-daemon 2>/dev/null || gradle test --no-daemon
+          fi
+          if [ -d build/reports/jacoco ]; then
+            cp -r build/reports/jacoco/* "$GITHUB_WORKSPACE/coverage/" 2>/dev/null || true
+          fi
+        else
+          echo "No Maven or Gradle build file found"
+          exit 1
+        fi
+
+    - name: Run Tests (Helm)
+      if: steps.ctx.outputs.language == 'helm'
+      shell: bash
+      working-directory: ${{ steps.ctx.outputs.context }}
+      run: |
+        set -e
+        release_name="test"
+        helm dependency build .
+        echo "=== helm template (local render) ==="
+        if [ -f values.yaml ]; then
+          helm template "$release_name" . -f values.yaml
+        else
+          helm template "$release_name" .
+        fi
+        echo "=== helm install --dry-run=server (validate against Kind) ==="
+        if [ -f values.yaml ]; then
+          helm install "$release_name" . -f values.yaml --dry-run=server
+        else
+          helm install "$release_name" . --dry-run=server
+        fi
+        echo "Helm template and dry-run against Kind succeeded."
+
+    # ── Coverage summary (render in Actions job summary; Markdown supported) ───
+    - name: Coverage summary
+      if: success() && (steps.ctx.outputs.language == 'rust' || steps.ctx.outputs.language == 'go' || steps.ctx.outputs.language == 'python' || steps.ctx.outputs.language == 'node' || steps.ctx.outputs.language == 'java')
+      shell: bash
+      working-directory: ${{ steps.ctx.outputs.context }}
+      run: |
+        SUMMARY="$GITHUB_STEP_SUMMARY"
+        ARTIFACT="coverage-${{ steps.ctx.outputs.name_slug }}"
+        echo "## Coverage report" >> "$SUMMARY"
+        echo "" >> "$SUMMARY"
+        if [ "${{ steps.ctx.outputs.language }}" = "rust" ]; then
+          echo "### Rust (llvm-cov)" >> "$SUMMARY"
+          echo '```' >> "$SUMMARY"
+          (cargo llvm-cov report --summary-only 2>/dev/null || echo "See artifact ${ARTIFACT} for full report.") >> "$SUMMARY"
+          echo '```' >> "$SUMMARY"
+        elif [ "${{ steps.ctx.outputs.language }}" = "go" ] && [ -f "$GITHUB_WORKSPACE/coverage/coverage.out" ]; then
+          echo "### Go" >> "$SUMMARY"
+          MODULE=$(go list -m 2>/dev/null || true)
+          echo "| File | Function | Coverage |" >> "$SUMMARY"
+          echo "|------|----------|----------|" >> "$SUMMARY"
+          go tool cover -func="$GITHUB_WORKSPACE/coverage/coverage.out" 2>/dev/null | sed "s|^${MODULE}/||" | awk -F'\t' 'NF>=3 { if ($1 ~ /^total/) { print "| **total** | " $2 " | **" $3 "** |" } else { print "| " $1 " | " $2 " | " $3 " |" } }' >> "$SUMMARY" || true
+        elif [ "${{ steps.ctx.outputs.language }}" = "python" ]; then
+          echo "### Python" >> "$SUMMARY"
+          if [ -f "$GITHUB_WORKSPACE/coverage/coverage.xml" ]; then
+            RATE=$(sed -n 's/.*line-rate="\([^"]*\)".*/\1/p' "$GITHUB_WORKSPACE/coverage/coverage.xml" | head -1)
+            if [ -n "$RATE" ]; then
+              PCT=$(echo "$RATE * 100" | bc 2>/dev/null || echo "$RATE" | awk '{ printf "%.1f", $1*100 }')
+              echo "| Scope | Line coverage |" >> "$SUMMARY"
+              echo "|-------|---------------|" >> "$SUMMARY"
+              echo "| **Total** | **${PCT}%** |" >> "$SUMMARY"
+            fi
+            echo "" >> "$SUMMARY"
+            echo "Full report in artifact \`${ARTIFACT}\` (XML + LCOV)." >> "$SUMMARY"
+          fi
+        elif [ "${{ steps.ctx.outputs.language }}" = "node" ]; then
+          echo "### Node (c8/nyc)" >> "$SUMMARY"
+          if [ -f "$GITHUB_WORKSPACE/coverage/lcov.info" ]; then
+            echo "LCOV report generated. See artifact \`${ARTIFACT}\` for full report." >> "$SUMMARY"
+          fi
+        elif [ "${{ steps.ctx.outputs.language }}" = "java" ]; then
+          echo "### Java (JaCoCo)" >> "$SUMMARY"
+          echo "See artifact \`${ARTIFACT}\` for HTML/XML report (if project has JaCoCo)." >> "$SUMMARY"
+        fi
+
+    # ── Upload coverage report (when produced) ─────────────────────────────────
+    - name: Upload coverage report
+      if: success() && (steps.ctx.outputs.language == 'rust' || steps.ctx.outputs.language == 'go' || steps.ctx.outputs.language == 'python' || steps.ctx.outputs.language == 'node' || steps.ctx.outputs.language == 'java')
+      uses: actions/upload-artifact@v4
+      with:
+        name: coverage-${{ steps.ctx.outputs.name_slug }}
+        path: coverage
+        if-no-files-found: ignore

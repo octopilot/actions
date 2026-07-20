@@ -50,7 +50,7 @@ inputs:
       Registry image for the pack BUILD cache (e.g.
       ghcr.io/org/myimage-buildcache). Persists buildpack cache layers (Rust
       toolchain + target dir) across ephemeral runners. Requires push access to
-      that registry and op v1.1.2+ (cache-image registry auth; older op fails UNAUTHORIZED).
+      that registry and op v1.1.1+ (older op ignores it harmlessly).
     required: false
     default: ''
 outputs:

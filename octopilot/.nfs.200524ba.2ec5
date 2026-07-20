@@ -28,7 +28,7 @@ inputs:
   op_version:
     description: 'Version of octopilot-pipeline-tools to use (e.g. v1.0.17).'
     required: false
-    default: 'v1.1.2'
+    default: 'v1.1.1'
   sbom_output:
     description: 'Path to output SBOMs.'
     required: false
@@ -50,7 +50,7 @@ inputs:
       Registry image for the pack BUILD cache (e.g.
       ghcr.io/org/myimage-buildcache). Persists buildpack cache layers (Rust
       toolchain + target dir) across ephemeral runners. Requires push access to
-      that registry and op v1.1.2+ (cache-image registry auth; older op fails UNAUTHORIZED).
+      that registry and op v1.1.1+ (older op ignores it harmlessly).
     required: false
     default: ''
 outputs:
@@ -156,16 +156,6 @@ runs:
             # mount was invisible unless the container ran as root with
             # HOME=/root, so cache-image write validation hit ghcr.io
             # anonymously and failed UNAUTHORIZED.
-            # Auth debug (no secrets): prove the config exists on the runner and
-            # is visible inside the container — 'unauthenticated' from GHCR with
-            # a bootstrap push having SUCCEEDED in the same job means creds are
-            # valid but not reaching the lifecycle.
-            if [ -f "${HOME}/.docker/config.json" ]; then
-              echo "[auth] runner docker config: present; registries: $(jq -r '.auths | keys | join(",")' "${HOME}/.docker/config.json" 2>/dev/null || echo unparseable)"
-            else
-              echo "[auth] runner docker config: MISSING (${HOME}/.docker/config.json)"
-            fi
-
             docker run --rm \
                 "${DOCKER_ARGS[@]}" \
                 -v "$GITHUB_WORKSPACE:/workspace" \
@@ -185,8 +175,7 @@ runs:
                 -e OP_CACHE_IMAGE="${INPUT_CACHE_IMAGE}" \
                 --entrypoint /bin/sh \
                 "$IMAGE" \
-                -c 'echo "[auth] in-container: user=$(id -u) DOCKER_CONFIG=$DOCKER_CONFIG config.json=$([ -f "$DOCKER_CONFIG/config.json" ] && echo visible || echo MISSING)" && \
-                  git config --global --add safe.directory /workspace && \
+                -c 'git config --global --add safe.directory /workspace && \
                   if [ -n "$OP_TTL_UUID" ]; then
                     OP_REPO_ARG=""; OP_EXTRA="--ttl-uuid $OP_TTL_UUID --ttl-tag ${OP_TTL_TAG:-1h}"
                   else
