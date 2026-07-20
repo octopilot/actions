@@ -338,6 +338,14 @@ def synthesize_rust_test_command(context_dir: str) -> str | None:
     # from the OpenAPI spec before testing (generated code must match the spec).
     if is_brrt_repo and os.path.isfile(os.path.join(context_dir, "examples", "openapi.yaml")):
         parts.append("cargo run --bin brrtrouter-gen -- generate --spec examples/openapi.yaml --force")
+        # Pre-build the e2e musl binary (mirrors ci.yml's dedicated build step):
+        # the curl harness's own build becomes a warm no-op, so the first test
+        # process starts the shared container in seconds instead of 60-90s of
+        # cold build while its five siblings queue on the cross-process lock.
+        if musl:
+            parts.append(
+                "cargo build --release -p pet_store --target x86_64-unknown-linux-musl"
+            )
 
     # Run via nextest (process-per-test isolation) — BRRTRouter's integration
     # tests spin up per-test HTTP servers and coroutine runtimes that interfere
