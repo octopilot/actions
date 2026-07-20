@@ -46,9 +46,11 @@ runs:
         PIPELINE_CONTEXT: ${{ inputs['pipeline-context'] }}
         INDEX: ${{ inputs['validate-context-index'] }}
       run: |
-        # Get first non-helm matrix item (or at INDEX)
+        # Get first non-helm, non-deliverable matrix item (or at INDEX) —
+        # deliverable legs ride in the same matrix for dynamic DAG rendering
+        # but are never the primary build context.
         CTX="$(echo "$PIPELINE_CONTEXT" | jq -c --argjson idx "$INDEX" '
-          [.matrix[] | select(.language != "helm")] | .[$idx] // empty
+          [.matrix[] | select(.language != "helm" and .kind != "deliverable")] | .[$idx] // empty
         ')"
         if [ -z "$CTX" ] || [ "$CTX" = "null" ]; then
           echo "::error::No build context found in pipeline-context.matrix (index $INDEX, non-helm)"

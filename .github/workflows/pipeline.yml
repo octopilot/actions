@@ -108,11 +108,16 @@ jobs:
         with:
           pipeline-context: ${{ needs.detect.outputs.pipeline-context }}
 
-  # ── 3. Test (matrix per detected language context) ─────────────────────────
+  # ── 3. Test + Deliverables (one dynamic matrix from detect-contexts) ───────
+  # The DAG renders exactly the legs that exist: detect-contexts emits every
+  # entry with `kind` (test | deliverable) and a human `job_label`, and this
+  # job dispatches per-entry. A repo without deliverables simply has no
+  # deliverable legs — no ghost "skipped" node to raise eyebrows — and job
+  # names never leak long synthesized commands.
   test:
     needs: detect
     if: toJSON(fromJson(needs.detect.outputs.pipeline-context).matrix) != '[]'
-    name: Test
+    name: ${{ matrix.job_label || 'Test' }}
     runs-on: ${{ inputs.runner }}
     # Hard cap — a hung test must fail the job, not burn 6h of runner time.
     timeout-minutes: 60
@@ -122,45 +127,31 @@ jobs:
         include: ${{ fromJson(needs.detect.outputs.pipeline-context).matrix }}
     steps:
       - uses: actions/checkout@v4
-      - uses: octopilot/actions/test@main
+
+      - name: Run tests
+        if: matrix.kind != 'deliverable'
+        uses: octopilot/actions/test@main
         with:
           pipeline-context: ${{ toJson(matrix) }}
 
-  # ── 3b. Deliverables (non-image meta-build functions: lib, binary) ─────────
-  # Every-run verification phase for artifacts routed by reserved suffix
-  # (-lib, -bin). A lib with publish mode `none` delivers a verified rev — the
-  # git-consumed library model. Tag-gated publish phases land in a later phase.
-  deliverables:
-    name: Deliverable (${{ matrix.output_key }})
-    needs: detect
-    if: >-
-      toJSON(fromJson(needs.detect.outputs.pipeline-context).deliverables_matrix) != 'null' &&
-      toJSON(fromJson(needs.detect.outputs.pipeline-context).deliverables_matrix) != '[]'
-    runs-on: ${{ inputs.runner }}
-    # Hard cap — a hung test must fail the job, not burn 6h of runner time.
-    timeout-minutes: 60
-    strategy:
-      fail-fast: false
-      matrix:
-        include: ${{ fromJson(needs.detect.outputs.pipeline-context).deliverables_matrix }}
-    steps:
-      - uses: actions/checkout@v4
-
+      # Deliverable legs (meta-build functions routed by reserved suffix):
+      # lib = "build and test it all" / verified rev; binary = release
+      # binaries + dist assembly. Tag-gated publishing lands in a later phase.
       - name: Verify lib deliverable
-        if: matrix.type == 'lib'
+        if: matrix.kind == 'deliverable' && matrix.type == 'lib'
         uses: octopilot/actions/deliverable-lib@main
         with:
           deliverable: ${{ toJson(matrix) }}
 
       - name: Build binary deliverable
         id: binary
-        if: matrix.type == 'binary'
+        if: matrix.kind == 'deliverable' && matrix.type == 'binary'
         uses: octopilot/actions/deliverable-binary@main
         with:
           deliverable: ${{ toJson(matrix) }}
 
       - name: Upload binary dist
-        if: matrix.type == 'binary'
+        if: matrix.kind == 'deliverable' && matrix.type == 'binary'
         uses: actions/upload-artifact@v4
         with:
           name: deliverable-${{ matrix.output_key }}

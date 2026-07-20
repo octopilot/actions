@@ -385,7 +385,19 @@ def build_matrix_include(artifacts: list[dict], repo_root: str) -> list[dict]:
             entry = entry_by_key.get(key)
             if entry is None:
                 sys.stderr.write(f"Detected {language} ({version}) for {image} in {context}\n")
-                entry = {"name": image, "context": context, "language": language, "version": version}
+                short = str(image).split("/")[-1].split(":")[0]
+                lang_label = f"{language} {version}".strip()
+                entry = {
+                    "name": image,
+                    "context": context,
+                    "language": language,
+                    "version": version,
+                    # kind + job_label drive dynamic DAG rendering: the Test job
+                    # names its legs from these, so nodes exist only for real
+                    # work (and never leak long synthesized commands into names).
+                    "kind": "test",
+                    "job_label": f"Test ({short}, {lang_label})",
+                }
                 entry_by_key[key] = entry
                 matrix_include.append(entry)
             else:
@@ -501,6 +513,9 @@ def build_deliverables_matrix(artifacts: list[dict], repo_root: str) -> list[dic
             "version": info["version"] or "",
             "output_key": f"{function}_{short}",
             "publish": publish,
+            # kind + job_label drive dynamic DAG rendering (see build_matrix_include)
+            "kind": "deliverable",
+            "job_label": f"Deliverable ({function}_{short})",
         }
         # BP_TEST_COMMAND (may contain spaces) belongs to the lint/test matrix,
         # not the deliverable's space-joined build_env.
@@ -524,10 +539,24 @@ def build_pipeline_context(config: dict, repo_root: str) -> dict:
     chart_paths = detect_helm_charts(repo_root)
     for path in chart_paths:
         name = f"helm-{path}" if path != "." else "helm"
-        matrix_include.append({"name": name, "context": path, "language": "helm", "version": ""})
+        matrix_include.append({
+            "name": name,
+            "context": path,
+            "language": "helm",
+            "version": "",
+            "kind": "test",
+            "job_label": f"Test ({path}, helm)",
+        })
 
     integration_matrix = build_integration_matrix(artifacts, chart_paths, repo_root)
     deliverables_matrix = build_deliverables_matrix(artifacts, repo_root)
+
+    # Dynamic DAG: deliverables ride in the SAME matrix as tests, so the
+    # pipeline renders exactly the legs that exist — a repo without
+    # deliverables gets no ghost "skipped" node, and a repo with them gets
+    # properly labelled legs. The standalone deliverables_matrix stays in the
+    # context for consumers/visibility.
+    matrix_include = matrix_include + deliverables_matrix
 
     unique_langs_set: set[str] = set()
     for item in matrix_include:
