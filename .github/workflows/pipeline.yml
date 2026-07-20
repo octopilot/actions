@@ -84,6 +84,8 @@ jobs:
   detect:
     name: Detect Contexts
     runs-on: ${{ inputs.runner }}
+    # Hard cap — a hung test must fail the job, not burn 6h of runner time.
+    timeout-minutes: 10
     outputs:
       pipeline-context: ${{ steps.detect.outputs.pipeline-context }}
     steps:
@@ -98,6 +100,8 @@ jobs:
     if: toJSON(fromJson(needs.detect.outputs.pipeline-context).languages) != '[]'
     name: Lint
     runs-on: ${{ inputs.runner }}
+    # Hard cap — a hung test must fail the job, not burn 6h of runner time.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v4
       - uses: octopilot/actions/lint@main
@@ -110,6 +114,8 @@ jobs:
     if: toJSON(fromJson(needs.detect.outputs.pipeline-context).matrix) != '[]'
     name: Test
     runs-on: ${{ inputs.runner }}
+    # Hard cap — a hung test must fail the job, not burn 6h of runner time.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -131,6 +137,8 @@ jobs:
       toJSON(fromJson(needs.detect.outputs.pipeline-context).deliverables_matrix) != 'null' &&
       toJSON(fromJson(needs.detect.outputs.pipeline-context).deliverables_matrix) != '[]'
     runs-on: ${{ inputs.runner }}
+    # Hard cap — a hung test must fail the job, not burn 6h of runner time.
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -164,6 +172,8 @@ jobs:
     name: Integration (validate)
     needs: [detect, lint, test]
     runs-on: ${{ inputs.runner }}
+    # Hard cap — a hung test must fail the job, not burn 6h of runner time.
+    timeout-minutes: 30
     outputs:
       uuid: ${{ steps.validate.outputs.uuid }}
     steps:
@@ -180,6 +190,8 @@ jobs:
     needs: [detect, integration-validate]
     if: toJSON(fromJson(needs.detect.outputs.pipeline-context).integration_matrix) != '[]'
     runs-on: ${{ inputs.runner }}
+    # Hard cap — a hung test must fail the job, not burn 6h of runner time.
+    timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
@@ -224,6 +236,8 @@ jobs:
     needs: [detect, integration-artifacts]
     if: ${{ inputs.integration }}
     runs-on: ${{ inputs.runner }}
+    # Hard cap — a hung test must fail the job, not burn 6h of runner time.
+    timeout-minutes: 45
     # Surface the (inherited) SOPS key via env so steps can gate on it — the
     # `secrets` context is not permitted in `if:` expressions.
     env:
