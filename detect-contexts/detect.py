@@ -455,13 +455,22 @@ def build_integration_matrix(artifacts: list[dict], chart_paths: list[str], repo
         if build_method == "pack":
             buildpacks = artifact.get("buildpacks") or {}
             entry["builder"] = buildpacks.get("builder", "paketobuildpacks/builder-jammy-base")
+            # BP_TEST_COMMAND (may contain spaces) belongs to the lint/test
+            # matrix, not the image's space-joined build_env — same exclusion
+            # as the deliverables matrix. A declared test command on an image
+            # artifact (e.g. nested-workspace repos) must not garble pack env.
             env = buildpacks.get("env")
+            if isinstance(env, list):
+                env = {
+                    k: v
+                    for k, v in (str(e).split("=", 1) for e in env if "=" in str(e))
+                }
             if isinstance(env, dict):
-                entry["build_env"] = " ".join(f"{k}={v}" for k, v in env.items())
+                env_out = {k: v for k, v in env.items() if k != "BP_TEST_COMMAND"}
+                if env_out:
+                    entry["build_env"] = " ".join(f"{k}={v}" for k, v in env_out.items())
             elif isinstance(env, str):
                 entry["build_env"] = env
-            elif isinstance(env, list):
-                entry["build_env"] = " ".join(str(e) for e in env)
             bp_extra = _gradle_bp_env_from_context(context_abs)
             if bp_extra:
                 existing = entry.get("build_env") or ""
