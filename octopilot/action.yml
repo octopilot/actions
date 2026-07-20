@@ -156,6 +156,16 @@ runs:
             # mount was invisible unless the container ran as root with
             # HOME=/root, so cache-image write validation hit ghcr.io
             # anonymously and failed UNAUTHORIZED.
+            # Auth debug (no secrets): prove the config exists on the runner and
+            # is visible inside the container — 'unauthenticated' from GHCR with
+            # a bootstrap push having SUCCEEDED in the same job means creds are
+            # valid but not reaching the lifecycle.
+            if [ -f "${HOME}/.docker/config.json" ]; then
+              echo "[auth] runner docker config: present; registries: $(jq -r '.auths | keys | join(",")' "${HOME}/.docker/config.json" 2>/dev/null || echo unparseable)"
+            else
+              echo "[auth] runner docker config: MISSING (${HOME}/.docker/config.json)"
+            fi
+
             docker run --rm \
                 "${DOCKER_ARGS[@]}" \
                 -v "$GITHUB_WORKSPACE:/workspace" \
@@ -175,7 +185,8 @@ runs:
                 -e OP_CACHE_IMAGE="${INPUT_CACHE_IMAGE}" \
                 --entrypoint /bin/sh \
                 "$IMAGE" \
-                -c 'git config --global --add safe.directory /workspace && \
+                -c 'echo "[auth] in-container: user=$(id -u) DOCKER_CONFIG=$DOCKER_CONFIG config.json=$([ -f "$DOCKER_CONFIG/config.json" ] && echo visible || echo MISSING)" && \
+                  git config --global --add safe.directory /workspace && \
                   if [ -n "$OP_TTL_UUID" ]; then
                     OP_REPO_ARG=""; OP_EXTRA="--ttl-uuid $OP_TTL_UUID --ttl-tag ${OP_TTL_TAG:-1h}"
                   else
