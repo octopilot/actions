@@ -196,18 +196,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
-      # Pack build-cache as a GHCR image: push events only — fork PRs have no
-      # write token, and the cache needs a STABLE name across runs (ttl.sh's
-      # per-run UUIDs are useless for caching). Old op versions ignore the
-      # cache image harmlessly; op v1.0.18+ restores/exports it.
+      # Pack build-cache as a GHCR image: push + workflow_dispatch only — fork
+      # PRs have no write token, and the cache needs a STABLE name across runs
+      # (ttl.sh's per-run UUIDs are useless for caching). Old op versions
+      # ignore the cache image harmlessly; op v1.0.18+ restores/exports it.
       - name: Login to GHCR for build cache
-        if: github.event_name == 'push' && matrix.type == 'image'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && matrix.type == 'image'
         shell: bash
         run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Derive build-cache image name
         id: cache
-        if: github.event_name == 'push' && matrix.type == 'image'
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && matrix.type == 'image'
         shell: bash
         env:
           MATRIX_IMAGE: ${{ matrix.image }}
@@ -220,14 +220,21 @@ jobs:
           # build. Bootstrap: push a tiny placeholder so the package exists
           # with the repo association; the lifecycle treats a metadata-less
           # cache image as empty and overwrites it on first export.
+          # docker import needs a REAL tar stream (raw text -> "unexpected
+          # EOF"), and the whole bootstrap is best-effort: any failure
+          # degrades to a cacheless build instead of failing the job.
           if ! docker manifest inspect "$img:latest" >/dev/null 2>&1; then
             echo "Bootstrapping build-cache package (first run): $img"
-            printf 'octopilot buildcache bootstrap' | docker import - "$img:latest" >/dev/null
-            if ! docker push "$img:latest" >/dev/null 2>&1; then
-              echo "::warning::build-cache bootstrap push failed for $img — building without cache this run"
+            stage="$(mktemp -d)"
+            echo 'octopilot buildcache bootstrap' > "$stage/.octopilot-buildcache-bootstrap"
+            if ! { tar -C "$stage" -cf - . | docker import - "$img:latest" >/dev/null \
+                   && docker push "$img:latest" >/dev/null 2>&1; }; then
+              echo "::warning::build-cache bootstrap failed for $img — building without cache this run"
               echo "image=" >> "$GITHUB_OUTPUT"
+              rm -rf "$stage"
               exit 0
             fi
+            rm -rf "$stage"
           fi
           echo "image=$img" >> "$GITHUB_OUTPUT"
 
