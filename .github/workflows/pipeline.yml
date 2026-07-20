@@ -370,8 +370,17 @@ jobs:
           fi
 
           if [ -d hack/ci-deps ]; then
-            kubectl apply -n "$NS" -f hack/ci-deps/
+            # ci-deps manifests are SELF-DESCRIBING: each object must declare
+            # metadata.namespace explicitly. No -n flag here — kubectl refuses
+            # objects whose declared namespace differs from -n, which breaks
+            # legitimate cross-namespace shims (e.g. an ExternalName Service
+            # aliasing a production-shaped hostname into the app namespace).
+            # See docs/ECOSYSTEM-AND-DEPENDENCIES.md.
+            kubectl apply -f hack/ci-deps/
+            # Readiness: wait on the app namespace, plus any ci-deps-labelled
+            # deployments in other namespaces (tier: ci-deps convention).
             kubectl wait --for=condition=available deploy --all -n "$NS" --timeout=180s || true
+            kubectl wait --for=condition=available deploy -A -l tier=ci-deps --timeout=60s || true
           fi
 
       - name: Setup Flux in Kind

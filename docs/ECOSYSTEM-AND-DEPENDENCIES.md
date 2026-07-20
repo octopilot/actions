@@ -24,9 +24,16 @@ The `integration-deploy` job runs these steps against a fresh Kind cluster:
    `SOPS_AGE_KEY`; skipped on fork PRs). This is where app config/secrets
    (connection strings, hostnames) come from.
 3. **`hack/ci-deps/`** — every manifest in this directory is
-   `kubectl apply -n $NS`-ed, then the pipeline waits (180s) for all
-   Deployments to become available. **This is the designated home for
-   ephemeral, CI-only service dependencies.**
+   `kubectl apply`-ed (no `-n` flag — see below), then the pipeline waits
+   (180s) for Deployments in the app namespace, plus any `tier: ci-deps`
+   labelled Deployments in other namespaces. **This is the designated home
+   for ephemeral, CI-only service dependencies.**
+
+   Contract: ci-deps manifests are **self-describing** — every object MUST
+   declare `metadata.namespace` explicitly (the pipeline passes no `-n`,
+   because kubectl refuses objects whose declared namespace differs from it,
+   which would break legitimate cross-namespace shims). Label everything
+   `tier: ci-deps` so cross-namespace readiness waits find it.
 4. **Flux overlay** — `k8s/env/ci` is kustomized, `envsubst`-ed with
    `IMG_<name>` / `CHART_*` variables, applied, and reconciled
    (OCIRepositories 2m, HelmReleases 8m).
