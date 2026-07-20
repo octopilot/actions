@@ -339,8 +339,16 @@ def synthesize_rust_test_command(context_dir: str) -> str | None:
     if is_brrt_repo and os.path.isfile(os.path.join(context_dir, "examples", "openapi.yaml")):
         parts.append("cargo run --bin brrtrouter-gen -- generate --spec examples/openapi.yaml --force")
 
+    # Run via nextest (process-per-test isolation) — BRRTRouter's integration
+    # tests spin up per-test HTTP servers and coroutine runtimes that interfere
+    # under libtest's shared-process threading; nextest is the repo's native
+    # runner. Prebuilt binary install keeps this fast (~1s).
     parts.append(
-        'cargo llvm-cov test --workspace --all-targets --no-fail-fast '
+        '(command -v cargo-nextest >/dev/null 2>&1 || '
+        'curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C "$HOME/.cargo/bin")'
+    )
+    parts.append(
+        'cargo llvm-cov nextest --workspace --all-targets --no-fail-fast '
         '--lcov --output-path "$GITHUB_WORKSPACE/coverage/lcov.info"'
     )
     return " && ".join(parts)
