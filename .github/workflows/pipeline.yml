@@ -30,7 +30,7 @@ on:
       op_version:
         description: Octopilot `op` builder image version for artifact builds.
         type: string
-        default: v1.1.0
+        default: v1.1.1
       actions_ref:
         description: >
           Ref of octopilot/actions the composite steps resolve to. Defaults to
