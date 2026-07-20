@@ -149,10 +149,18 @@ runs:
             # Pass ttl-uuid/ttl-tag and registry via env so op args are built inside the
             # container (avoids interpolating user input in the host shell). op supports
             # --ttl-uuid / --ttl-tag and writes build_result.json with ttl.sh refs.
+            # Registry auth: mount the runner's docker config at a neutral path
+            # and point DOCKER_CONFIG at it. ggcr's keychain (op/pack ->
+            # CNB_REGISTRY_AUTH for the lifecycle) honors DOCKER_CONFIG
+            # regardless of the container user's HOME; the old /root/.docker
+            # mount was invisible unless the container ran as root with
+            # HOME=/root, so cache-image write validation hit ghcr.io
+            # anonymously and failed UNAUTHORIZED.
             docker run --rm \
                 "${DOCKER_ARGS[@]}" \
                 -v "$GITHUB_WORKSPACE:/workspace" \
-                -v "${HOME}/.docker:/root/.docker:ro" \
+                -v "${HOME}/.docker:/docker-config:ro" \
+                -e DOCKER_CONFIG=/docker-config \
                 -w "/workspace" \
                 -e DOCKER_METADATA_OUTPUT_VERSION="${VERSION}" \
                 -e GITHUB_ACTIONS="true" \
