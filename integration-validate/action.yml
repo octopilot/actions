@@ -59,6 +59,9 @@ runs:
         echo "context=${CTX}" >> "$GITHUB_OUTPUT"
         echo "language=$(echo "$CTX" | jq -r '.language')" >> "$GITHUB_OUTPUT"
         echo "version=$(echo "$CTX" | jq -r '.version // ""')" >> "$GITHUB_OUTPUT"
+        # Effective language dir (nested workspaces, e.g. microservices/):
+        # toolchain builds must run HERE, not at repo root.
+        echo "workdir=$(echo "$CTX" | jq -r '.workdir // .context // "."')" >> "$GITHUB_OUTPUT"
         echo "ctx_context=$(echo "$CTX" | jq -r '.context // "."')" >> "$GITHUB_OUTPUT"
 
     # ── Toolchain setup (same pattern as test action) ───────────────────────────
@@ -92,7 +95,7 @@ runs:
     - name: Build release (Rust)
       if: steps.resolve.outputs.language == 'rust'
       shell: bash
-      working-directory: ${{ steps.resolve.outputs.ctx_context }}
+      working-directory: ${{ steps.resolve.outputs.workdir }}
       env:
         CARGO_TARGET_DIR: ${{ github.workspace }}/target
         CARGO_BUILD_INCREMENTAL: true
@@ -108,7 +111,7 @@ runs:
     - name: Build release (Go)
       if: steps.resolve.outputs.language == 'go'
       shell: bash
-      working-directory: ${{ steps.resolve.outputs.ctx_context }}
+      working-directory: ${{ steps.resolve.outputs.workdir }}
       run: |
         mkdir -p "$GITHUB_WORKSPACE/bin"
         go build -o "$GITHUB_WORKSPACE/bin/app" .
