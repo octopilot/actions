@@ -38,17 +38,42 @@ The `integration-deploy` job runs these steps against a fresh Kind cluster:
    `IMG_<name>` / `CHART_*` variables, applied, and reconciled
    (OCIRepositories 2m, HelmReleases 8m).
 
+## Test-phase dependencies: `hack/test-deps/` (the BDD convention)
+
+The **Test job** (not the integration deploy) runs on a plain runner with
+Docker. Repos whose test suites need live services — BDD suites against
+Postgres, integration tests against Redis or a broker — declare them once in
+`hack/test-deps/docker-compose.yml` (or `compose.yaml`). Before running the
+test command, the test action executes:
+
+    docker compose -f hack/test-deps/docker-compose.yml up -d --wait
+
+`--wait` blocks on compose **healthchecks**, so declare one per service (the
+compose-native equivalent of the ci-deps readiness contract). No teardown is
+needed — runners are ephemeral.
+
+Connection details are the test command's business: export `TEST_DB_*` (or
+whatever your harness reads) inside `BP_TEST_COMMAND`. When the ritual is more
+than a line, put it in a **committed script** (`hack/test.sh`) and declare
+`BP_TEST_COMMAND=./hack/test.sh` — versioned, reviewable, and runnable locally
+with the same compose file (`docker compose -f hack/test-deps/docker-compose.yml
+up -d --wait && ./hack/test.sh`).
+
+This replaces per-repo GitHub Actions `services:` blocks: the reusable
+pipeline cannot know your services, but your repo can declare them.
+
 ## Decision guide: where does my dependency go?
 
 | Mechanism | Use when | Avoid when |
 |-----------|----------|------------|
-| **`hack/ci-deps/` manifests** (DEFAULT) | The dep is CI-only scaffolding: a throwaway Postgres/Redis/mock. Plain Deployment+Service, `emptyDir` storage, fixed dev credentials matching the profile's secrets. | The dep's lifecycle must mirror production (operators, HA, migrations-as-jobs). |
+| **`hack/ci-deps/` manifests** (DEFAULT for deploy phase) | The dep is CI-only scaffolding: a throwaway Postgres/Redis/mock. Plain Deployment+Service, `emptyDir` storage, fixed dev credentials matching the profile's secrets. | The dep's lifecycle must mirror production (operators, HA, migrations-as-jobs). |
+| **`hack/test-deps/` compose file** (DEFAULT for test phase) | Unit/BDD suites in the Test job need `localhost` services (Postgres for a BDD harness). Healthchecked compose services; test command exports its own connection env. | The dep must run inside the Kind cluster (that is the deploy phase — use ci-deps). |
 | **Flux overlay HelmRelease** (`k8s/env/ci`) | Production ALSO runs the dep via Flux (operator or chart) and you want topology parity in CI. Use `dependsOn` to order app after dep. | You just need "a Postgres" — a full chart/operator pull slows every CI run for no extra confidence. |
 | **Subchart toggle** (`postgresql.enabled` in the app chart) | The PRODUCT genuinely ships an embedded-dependency mode to end users. The toggle is a product feature, not a CI convenience. | You'd only ever enable it in CI. That leaks CI concerns into the product chart and bloats it with infra it doesn't own. |
-| **GitHub Actions `services:`** | Runner-local test jobs (unit/BDD against `localhost:5432`). | The integration deploy — pods inside Kind cannot reach runner-local services cleanly. |
+| **GitHub Actions `services:`** | Only in repo-owned workflows outside the reusable pipeline (e.g. a legacy bdd.yml being migrated). | Anything the reusable pipeline runs — it cannot know your services; declare them in hack/test-deps instead. |
 
-Rule of thumb: **ci-deps for scaffolding, overlay for parity, subchart only for
-product features, GH services only outside the cluster.**
+Rule of thumb: **test-deps for the Test job, ci-deps for the Kind deploy,
+overlay for parity, subchart only for product features.**
 
 ## Gotcha: hostname conventions must agree
 

@@ -35,6 +35,26 @@ runs:
         SLUG="$(echo "$NAME" | sed 's/[^A-Za-z0-9._-]/-/g' | sed 's/^-*//;s/-*$//' | head -c 50)"
         echo "name_slug=${SLUG:-unknown}" >> "$GITHUB_OUTPUT"
 
+    # ── Test-phase service dependencies (hack/test-deps convention) ──────────
+    # A repo whose tests need live services (Postgres for BDD suites, Redis,
+    # a broker...) declares them ONCE in hack/test-deps/docker-compose.yml
+    # with healthchecks; `up -d --wait` blocks until healthy. This is the
+    # test-phase analogue of hack/ci-deps (integration deploy phase) — see
+    # docs/ECOSYSTEM-AND-DEPENDENCIES.md. Connection details are the test
+    # command's business (export TEST_DB_* in BP_TEST_COMMAND or the repo's
+    # hack/test.sh). No teardown: runners are ephemeral.
+    - name: Start test-phase service dependencies (hack/test-deps)
+      shell: bash
+      run: |
+        for f in hack/test-deps/docker-compose.yml hack/test-deps/compose.yaml; do
+          if [ -f "$f" ]; then
+            echo "Starting test-phase dependencies from $f"
+            docker compose -f "$f" up -d --wait --quiet-pull
+            docker compose -f "$f" ps
+            break
+          fi
+        done
+
     # ── Toolchain setup (one branch executes per matrix item) ─────────────────
 
     - name: Setup Go
