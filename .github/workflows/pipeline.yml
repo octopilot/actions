@@ -119,6 +119,9 @@ jobs:
     if: toJSON(fromJson(needs.detect.outputs.pipeline-context).matrix) != '[]'
     name: ${{ matrix.job_label || 'Test' }}
     runs-on: ${{ inputs.runner }}
+    # soft_fail legs (BP_TEST_SOFT_FAIL declared in skaffold) report honestly
+    # but never block the pipeline — their label carries "advisory".
+    continue-on-error: ${{ matrix.soft_fail == true }}
     # Hard cap — a hung test must fail the job, not burn 6h of runner time.
     timeout-minutes: 60
     strategy:

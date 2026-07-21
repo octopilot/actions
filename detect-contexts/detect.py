@@ -430,11 +430,20 @@ def build_matrix_include(artifacts: list[dict], repo_root: str) -> list[dict]:
             declared_cmd = env.get("BP_TEST_COMMAND")
             if declared_cmd:
                 test_label = env.get("BP_TEST_LABEL", "").strip()
+                # BP_TEST_SOFT_FAIL=true: the leg runs and reports honestly,
+                # but a failure does not block the pipeline (job-level
+                # continue-on-error). For known-broken-with-a-tracked-cause
+                # suites; the label carries an "advisory" marker so the DAG
+                # never hides that the gate is soft.
+                soft_fail = env.get("BP_TEST_SOFT_FAIL", "").strip().lower() in ("true", "1", "yes")
                 lang_label_now = f"{entry['language']} {entry['version']}".strip()
+                advisory = ", advisory" if soft_fail else ""
                 if not entry.get("command"):
                     entry["command"] = declared_cmd
+                    if soft_fail:
+                        entry["soft_fail"] = True
                     if test_label:
-                        entry["job_label"] = f"Test ({test_label}, {lang_label_now})"
+                        entry["job_label"] = f"Test ({test_label}{advisory}, {lang_label_now})"
                         entry["_explicit_label"] = True
                     sys.stderr.write(f"Test command override for {entry['name']}: {declared_cmd}\n")
                 elif entry["command"] != declared_cmd:
@@ -449,8 +458,10 @@ def build_matrix_include(artifacts: list[dict], repo_root: str) -> list[dict]:
                             "version": entry["version"],
                             "kind": "test",
                             "command": declared_cmd,
-                            "job_label": f"Test ({test_label or short}, {lang_label_now})",
+                            "job_label": f"Test ({test_label or short}{advisory}, {lang_label_now})",
                         }
+                        if soft_fail:
+                            leg["soft_fail"] = True
                         extra_leg_by_cmd[leg_key] = leg
                         matrix_include.append(leg)
                         sys.stderr.write(
@@ -458,8 +469,10 @@ def build_matrix_include(artifacts: list[dict], repo_root: str) -> list[dict]:
                         )
                 elif test_label:
                     # Same command re-declared with a label: adopt the label.
-                    entry["job_label"] = f"Test ({test_label}, {lang_label_now})"
+                    entry["job_label"] = f"Test ({test_label}{advisory}, {lang_label_now})"
                     entry["_explicit_label"] = True
+                    if soft_fail:
+                        entry["soft_fail"] = True
         else:
             sys.stderr.write(f"Could not detect language for {image} in {context}\n")
 
