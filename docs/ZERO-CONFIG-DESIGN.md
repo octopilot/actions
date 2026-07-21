@@ -78,7 +78,7 @@ keep = ["doc", "config", "static_site"]
 function = "bin"                    # CLI: -bin deliverable instead of image
 publish = "none"                    # lib verify-only
 test-label = "bdd"                  # parallel test leg membership
-
+```
 
 `cargo metadata` surfaces `package.metadata` verbatim — detect reads it with
 zero new parsers. package.json gets `"octopilot": {…}`; Chart.yaml gets
