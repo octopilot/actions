@@ -390,6 +390,11 @@ def build_matrix_include(artifacts: list[dict], repo_root: str) -> list[dict]:
                 entry = {
                     "name": image,
                     "context": context,
+                    # workdir = the EFFECTIVE language dir (honors
+                    # BP_RUST_WORKSPACE_DIR for nested workspaces): where
+                    # toolchain commands (fmt/clippy/test) must run. context
+                    # stays the artifact's declared build context.
+                    "workdir": os.path.relpath(probe_dir, repo_root),
                     "language": language,
                     "version": version,
                     # kind + job_label drive dynamic DAG rendering: the Test job
@@ -426,6 +431,7 @@ def build_matrix_include(artifacts: list[dict], repo_root: str) -> list[dict]:
 def build_integration_matrix(artifacts: list[dict], chart_paths: list[str], repo_root: str) -> list[dict]:
     """Build integration matrix (image docker/pack + chart entries) from skaffold artifacts and chart_paths."""
     integration_matrix: list[dict] = []
+    used_suffixes: set[str] = set()
     for artifact in artifacts:
         image = artifact.get("image", "")
         context = artifact.get("context", ".")
@@ -437,7 +443,16 @@ def build_integration_matrix(artifacts: list[dict], chart_paths: list[str], repo
             continue
         image_name = image.split("/")[-1].split(":")[0]
         parts = image_name.split("-")
+        # Last dash-segment keeps keys short and stable for existing repos —
+        # but many-artifact fleets collide on it (four `*-worker` images would
+        # all become image_worker). On collision, widen to everything after the
+        # first dash (drops only the repo-name prefix), then to the full name.
         suffix = parts[-1] if parts else image_name
+        if suffix in used_suffixes:
+            suffix = image_name.split("-", 1)[1] if "-" in image_name else image_name
+        if suffix in used_suffixes:
+            suffix = image_name
+        used_suffixes.add(suffix)
         output_key = f"image_{suffix}"
         context_abs = os.path.normpath(os.path.join(repo_root, context))
         has_dockerfile = os.path.isfile(os.path.join(context_abs, "Dockerfile"))
@@ -589,11 +604,24 @@ def build_pipeline_context(config: dict, repo_root: str) -> dict:
         else:
             versions[lang] = ""
 
+    # Per-language effective workdirs (nested workspaces): consumers that run
+    # toolchain commands repo-wide (lint) must run them HERE, not at repo root.
+    workdirs: dict[str, list[str]] = {}
+    for item in matrix_include:
+        lang = item.get("language")
+        if not isinstance(lang, str) or not lang:
+            continue
+        wd = item.get("workdir") or item.get("context") or "."
+        workdirs.setdefault(lang, [])
+        if wd not in workdirs[lang]:
+            workdirs[lang].append(wd)
+
     return {
         "matrix": matrix_include,
         "languages": unique_langs,
         "versions": versions,
         "chart_paths": chart_paths,
+        "workdirs": workdirs,
         "integration_matrix": integration_matrix,
         "deliverables_matrix": deliverables_matrix,
     }

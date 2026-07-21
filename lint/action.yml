@@ -80,6 +80,11 @@ runs:
         echo "python_version=$(ver python)" >> "$GITHUB_OUTPUT"
         echo "java_version=$(ver java)"   >> "$GITHUB_OUTPUT"
         echo "helm_version=$(ver helm)"   >> "$GITHUB_OUTPUT"
+        # Effective language workdirs (nested workspaces, e.g. a Cargo
+        # workspace at microservices/): toolchain commands run THERE, not at
+        # repo root. Falls back to "." for pipeline-contexts from older
+        # detect-contexts without the workdirs key.
+        echo "rust_workdirs=$(echo "$PIPELINE_CONTEXT" | jq -r '(.workdirs.rust // ["."]) | join(" ")')" >> "$GITHUB_OUTPUT"
 
     # ── Language toolchain setup (conditional on detected languages) ──────────
 
@@ -141,14 +146,21 @@ runs:
     - name: Check Rust formatting
       if: steps.ctx.outputs.has_rust == 'true'
       shell: bash
-      run: cargo fmt --all -- --check
+      run: |
+        for d in ${{ steps.ctx.outputs.rust_workdirs }}; do
+          echo "cargo fmt --check in ${d}"
+          (cd "$d" && cargo fmt --all -- --check)
+        done
 
     - name: Run Clippy
       if: steps.ctx.outputs.has_rust == 'true'
       shell: bash
       run: |
-        cargo clippy --all-targets --all-features -- -D warnings \
-          || echo "⚠️  Clippy found warnings (non-blocking — fix before merge)"
+        for d in ${{ steps.ctx.outputs.rust_workdirs }}; do
+          echo "cargo clippy in ${d}"
+          (cd "$d" && cargo clippy --all-targets --all-features -- -D warnings) \
+            || echo "⚠️  Clippy found warnings in ${d} (non-blocking — fix before merge)"
+        done
 
     # ── Go: run golangci-lint via its dedicated action ────────────────────────
     # The pre-commit golangci-lint hook runs inside its own sandboxed virtual
