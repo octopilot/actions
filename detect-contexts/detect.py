@@ -407,6 +407,14 @@ def build_matrix_include(artifacts: list[dict], repo_root: str) -> list[dict]:
                 matrix_include.append(entry)
             else:
                 sys.stderr.write(f"Deduped {language} context for {image} ({probe_dir} already covered)\n")
+                # This leg now covers MULTIPLE artifacts sharing one workspace:
+                # relabel it after the workspace, not the first image, so the
+                # DAG reads "Test (microservices, rust)" instead of implying a
+                # single-service test (e.g. "Test (hauliage-analytics, rust)").
+                wd = entry.get("workdir") or "."
+                display = wd if wd != "." else "workspace"
+                shared_lang_label = f"{entry['language']} {entry['version']}".strip()
+                entry["job_label"] = f"Test ({display}, {shared_lang_label})"
             # A context's test command may be declared (BP_TEST_COMMAND) on ANY
             # artifact sharing that context — -lib artifacts are the natural
             # home. The test action honors matrix.command over its default.
