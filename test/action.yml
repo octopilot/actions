@@ -35,6 +35,27 @@ runs:
         SLUG="$(echo "$NAME" | sed 's/[^A-Za-z0-9._-]/-/g' | sed 's/^-*//;s/-*$//' | head -c 50)"
         echo "name_slug=${SLUG:-unknown}" >> "$GITHUB_OUTPUT"
 
+    # ── Disk headroom (GitHub-hosted runners only, threshold-gated) ──────────
+    # ubuntu-latest ships ~14 GB free; a large Rust workspace's target/ blows
+    # past that (ENOSPC mid-link). Pruning preinstalled toolchains we never
+    # use (dotnet, Android, GHC, CodeQL, boost) reclaims ~25-30 GB. Gated on
+    # free space < 25 GB so self-hosted runners with real disks skip it
+    # entirely (and never need the sudo).
+    - name: Reclaim runner disk (best effort, low-disk only)
+      shell: bash
+      run: |
+        avail_kb=$(df --output=avail -k / | tail -1 | tr -d ' ')
+        if [ "${avail_kb:-0}" -lt 26214400 ]; then
+          echo "Low disk: $((avail_kb / 1024 / 1024)) GB free — pruning preinstalled toolchains"
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc \
+            /opt/hostedtoolcache/CodeQL /usr/local/share/boost \
+            /usr/local/.ghcup 2>/dev/null || true
+          sudo docker image prune -af > /dev/null 2>&1 || true
+          echo "After prune: $(df -h / | tail -1)"
+        else
+          echo "Disk OK: $((avail_kb / 1024 / 1024)) GB free — no prune needed"
+        fi
+
     # ── Test-phase service dependencies (hack/test-deps convention) ──────────
     # A repo whose tests need live services (Postgres for BDD suites, Redis,
     # a broker...) declares them ONCE in hack/test-deps/docker-compose.yml
