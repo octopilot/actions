@@ -371,6 +371,9 @@ def build_matrix_include(artifacts: list[dict], repo_root: str) -> list[dict]:
     """
     matrix_include: list[dict] = []
     entry_by_key: dict[tuple[str, str], dict] = {}
+    # Additional parallel test legs: one per DISTINCT declared BP_TEST_COMMAND
+    # beyond the shared leg's (e.g. unit and BDD suites side by side).
+    extra_leg_by_cmd: dict[tuple[tuple[str, str], str], dict] = {}
     for artifact in artifacts:
         image = artifact.get("image")
         context = artifact.get("context", ".")
@@ -410,17 +413,53 @@ def build_matrix_include(artifacts: list[dict], repo_root: str) -> list[dict]:
                 # This leg now covers MULTIPLE artifacts sharing one workspace:
                 # relabel it after the workspace, not the first image, so the
                 # DAG reads "Test (microservices, rust)" instead of implying a
-                # single-service test (e.g. "Test (hauliage-analytics, rust)").
-                wd = entry.get("workdir") or "."
-                display = wd if wd != "." else "workspace"
-                shared_lang_label = f"{entry['language']} {entry['version']}".strip()
-                entry["job_label"] = f"Test ({display}, {shared_lang_label})"
+                # single-service test — unless an explicit BP_TEST_LABEL
+                # already named it.
+                if not entry.get("_explicit_label"):
+                    wd = entry.get("workdir") or "."
+                    display = wd if wd != "." else "workspace"
+                    shared_lang_label = f"{entry['language']} {entry['version']}".strip()
+                    entry["job_label"] = f"Test ({display}, {shared_lang_label})"
             # A context's test command may be declared (BP_TEST_COMMAND) on ANY
-            # artifact sharing that context — -lib artifacts are the natural
-            # home. The test action honors matrix.command over its default.
-            if env.get("BP_TEST_COMMAND") and not entry.get("command"):
-                entry["command"] = env["BP_TEST_COMMAND"]
-                sys.stderr.write(f"Test command override for {entry['name']}: {entry['command']}\n")
+            # artifact sharing that context. The FIRST declared command becomes
+            # the shared leg's command; each artifact declaring a DIFFERENT
+            # command spawns an ADDITIONAL parallel test leg — separate runners
+            # (no cargo build-dir lock contention, own caches), so e.g. unit
+            # and BDD suites of one workspace run concurrently. BP_TEST_LABEL
+            # names a leg in the DAG: "Test (bdd, rust)".
+            declared_cmd = env.get("BP_TEST_COMMAND")
+            if declared_cmd:
+                test_label = env.get("BP_TEST_LABEL", "").strip()
+                lang_label_now = f"{entry['language']} {entry['version']}".strip()
+                if not entry.get("command"):
+                    entry["command"] = declared_cmd
+                    if test_label:
+                        entry["job_label"] = f"Test ({test_label}, {lang_label_now})"
+                        entry["_explicit_label"] = True
+                    sys.stderr.write(f"Test command override for {entry['name']}: {declared_cmd}\n")
+                elif entry["command"] != declared_cmd:
+                    leg_key = (key, declared_cmd)
+                    if leg_key not in extra_leg_by_cmd:
+                        short = str(image).split("/")[-1].split(":")[0]
+                        leg = {
+                            "name": image,
+                            "context": entry["context"],
+                            "workdir": entry.get("workdir", "."),
+                            "language": entry["language"],
+                            "version": entry["version"],
+                            "kind": "test",
+                            "command": declared_cmd,
+                            "job_label": f"Test ({test_label or short}, {lang_label_now})",
+                        }
+                        extra_leg_by_cmd[leg_key] = leg
+                        matrix_include.append(leg)
+                        sys.stderr.write(
+                            f"Parallel test leg ({test_label or short}) for {probe_dir}: {declared_cmd}\n"
+                        )
+                elif test_label:
+                    # Same command re-declared with a label: adopt the label.
+                    entry["job_label"] = f"Test ({test_label}, {lang_label_now})"
+                    entry["_explicit_label"] = True
         else:
             sys.stderr.write(f"Could not detect language for {image} in {context}\n")
 
@@ -433,6 +472,9 @@ def build_matrix_include(artifacts: list[dict], repo_root: str) -> list[dict]:
             if synthesized:
                 entry["command"] = synthesized
                 sys.stderr.write(f"Synthesized test command for {entry['name']}: {synthesized}\n")
+    # Internal bookkeeping keys never leave this function.
+    for entry in matrix_include:
+        entry.pop("_explicit_label", None)
     return matrix_include
 
 
