@@ -13,12 +13,18 @@ name: Octopilot Pipeline
 # secrets, or is skipped when absent.
 #
 # Consume it from a caller with:
+#   concurrency:                       # one run per ref; never cancel releases
+#     group: octopilot-ci-${{ github.ref }}
+#     cancel-in-progress: ${{ !startsWith(github.ref, 'refs/tags/') }}
 #   jobs:
 #     build:
 #       uses: octopilot/actions/.github/workflows/pipeline.yml@v1
 #       secrets: inherit
 # then add repo-specific jobs (deploy, release) that `needs: build` and download
 # the `integration-*` artifacts this workflow uploads.
+#
+# Concurrency lives in the CALLER (its run is the unit of cancellation);
+# a reusable workflow cannot meaningfully group across callers.
 
 on:
   workflow_call:
