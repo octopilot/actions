@@ -137,6 +137,17 @@ runs:
         distribution: temurin
         java-version: ${{ steps.ctx.outputs.java_version || '17' }}
 
+    # Clippy compiles the workspace, so native build prerequisites must exist —
+    # -sys crates (openssl-sys et al.) need pkg-config + libssl-dev. Bare
+    # self-hosted runners lack what GitHub-hosted images preinstall.
+    - name: Install Rust native build prerequisites (Linux)
+      if: steps.ctx.outputs.has_rust == 'true' && runner.os == 'Linux'
+      shell: bash
+      run: |
+        if ! command -v pkg-config >/dev/null 2>&1 || ! dpkg -s libssl-dev >/dev/null 2>&1; then
+          sudo apt-get update -qq && sudo apt-get install -y pkg-config libssl-dev
+        fi
+
     # ── Rust: explicit fmt + clippy (not via pre-commit) ─────────────────────
     # pre-commit Rust hooks run inside an isolated virtualenv that lacks the
     # project's Rust toolchain and therefore cannot reliably run rustfmt or
@@ -233,7 +244,13 @@ runs:
 
     - name: Install pre-commit
       shell: bash
-      run: pip install pre-commit
+      run: |
+        # Bare self-hosted runners may lack pip on PATH; bootstrap via python3.
+        if ! command -v pre-commit >/dev/null 2>&1; then
+          python3 -m pip install --user pre-commit 2>/dev/null \
+            || (sudo apt-get update -qq && sudo apt-get install -y python3-pip && python3 -m pip install --user pre-commit)
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+        fi
 
     - name: Cache pre-commit environments
       uses: actions/cache@v4

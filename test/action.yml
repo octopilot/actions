@@ -177,7 +177,10 @@ runs:
       if: steps.ctx.outputs.language == 'rust' && runner.os == 'Linux'
       shell: bash
       run: |
-        sudo apt-get update -qq && sudo apt-get install -y mold
+        # mold for fast links; pkg-config + libssl-dev because -sys crates
+        # (openssl-sys et al.) need them and bare self-hosted runners lack
+        # what GitHub-hosted images preinstall.
+        sudo apt-get update -qq && sudo apt-get install -y mold pkg-config libssl-dev
 
     - name: Run Tests (Rust) with LLVM coverage
       if: steps.ctx.outputs.language == 'rust'
