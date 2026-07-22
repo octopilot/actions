@@ -70,6 +70,17 @@ runs:
         for f in hack/test-deps/docker-compose.yml hack/test-deps/compose.yaml; do
           if [ -f "$f" ]; then
             echo "Starting test-phase dependencies from $f"
+            # Bare self-hosted runners may lack the compose v2 plugin
+            # (GitHub-hosted images preinstall it). Install on demand:
+            # docker-compose-plugin (Docker apt repo) or docker-compose-v2
+            # (Ubuntu archive). v1 docker-compose is NOT a fallback — it has
+            # no `up --wait`, which the healthcheck contract relies on.
+            if ! docker compose version >/dev/null 2>&1; then
+              echo "compose v2 plugin missing — installing"
+              sudo apt-get update -qq
+              sudo apt-get install -y docker-compose-plugin 2>/dev/null \
+                || sudo apt-get install -y docker-compose-v2
+            fi
             docker compose -f "$f" up -d --wait --quiet-pull
             docker compose -f "$f" ps
             break
