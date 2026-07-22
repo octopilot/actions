@@ -24,7 +24,12 @@ on:
   workflow_call:
     inputs:
       runner:
-        description: Runner label for all jobs.
+        description: >
+          Runner for all jobs. Either a single label string (default
+          "ubuntu-latest") or a JSON array string for self-hosted label sets,
+          e.g. '["self-hosted", "linux", "x64", "microscaler"]'. Self-hosted
+          runners need docker + passwordless sudo (mold/musl apt installs);
+          the low-disk reclaim step auto-skips on machines with real disks.
         type: string
         default: ubuntu-latest
       op_version:
@@ -83,7 +88,7 @@ jobs:
   # ── 1. Auto-detect languages and versions from skaffold.yaml ───────────────
   detect:
     name: Detect Contexts
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ (startsWith(inputs.runner, '[') && fromJSON(inputs.runner)) || inputs.runner }}
     # Hard cap — a hung test must fail the job, not burn 6h of runner time.
     timeout-minutes: 10
     outputs:
@@ -99,7 +104,7 @@ jobs:
     needs: detect
     if: toJSON(fromJson(needs.detect.outputs.pipeline-context).languages) != '[]'
     name: Lint
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ (startsWith(inputs.runner, '[') && fromJSON(inputs.runner)) || inputs.runner }}
     # Hard cap — a hung test must fail the job, not burn 6h of runner time.
     timeout-minutes: 30
     steps:
@@ -118,7 +123,7 @@ jobs:
     needs: detect
     if: toJSON(fromJson(needs.detect.outputs.pipeline-context).matrix) != '[]'
     name: ${{ matrix.job_label || 'Test' }}
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ (startsWith(inputs.runner, '[') && fromJSON(inputs.runner)) || inputs.runner }}
     # soft_fail legs (BP_TEST_SOFT_FAIL declared in skaffold) report honestly
     # but never block the pipeline — their label carries "advisory".
     continue-on-error: ${{ matrix.soft_fail == true }}
@@ -165,7 +170,7 @@ jobs:
   integration-validate:
     name: Integration (validate)
     needs: [detect, lint, test]
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ (startsWith(inputs.runner, '[') && fromJSON(inputs.runner)) || inputs.runner }}
     # Hard cap — a hung test must fail the job, not burn 6h of runner time.
     timeout-minutes: 30
     outputs:
@@ -183,7 +188,7 @@ jobs:
     name: Integration (${{ matrix.suffix || matrix.output_key }})
     needs: [detect, integration-validate]
     if: toJSON(fromJson(needs.detect.outputs.pipeline-context).integration_matrix) != '[]'
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ (startsWith(inputs.runner, '[') && fromJSON(inputs.runner)) || inputs.runner }}
     # packages:write lets the job push the pack build-cache image to GHCR
     # (warm buildpack caches across ephemeral runners). Other permissions
     # revert to restrictive defaults once any permission is declared.
@@ -278,7 +283,7 @@ jobs:
     name: Integration (deploy)
     needs: [detect, integration-artifacts]
     if: ${{ inputs.integration }}
-    runs-on: ${{ inputs.runner }}
+    runs-on: ${{ (startsWith(inputs.runner, '[') && fromJSON(inputs.runner)) || inputs.runner }}
     # Hard cap — a hung test must fail the job, not burn 6h of runner time.
     timeout-minutes: 45
     # Surface the (inherited) SOPS key via env so steps can gate on it — the
