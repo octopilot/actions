@@ -1,0 +1,20 @@
+name: "Upload each file as artifact"
+description: >
+  Upload every direct child file in a directory as its own GitHub Actions
+  artifact. Runs as a JavaScript action so ACTIONS_RUNTIME_TOKEN is injected
+  (unlike shelling out to node from a composite run step).
+inputs:
+  directory:
+    description: Directory whose direct children are uploaded (one artifact each).
+    required: true
+  prefix:
+    description: Artifact name prefix (e.g. bin- -> bin-hauliage_migrator).
+    required: false
+    default: "bin-"
+  retention-days:
+    description: Artifact retention in days.
+    required: false
+    default: "7"
+runs:
+  using: node20
+  main: dist/index.js

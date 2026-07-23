@@ -75,37 +75,23 @@ runs:
         echo "out-dir=$OUT" >> "$GITHUB_OUTPUT"
         echo "count=$count" >> "$GITHUB_OUTPUT"
 
-    # Per-binary artifacts: plain upload-artifact = one static step per
-    # artifact, so a toolkit script drives N uploads from one step.
-    # setup-node first: GitHub-hosted images ship node/npm but bare
-    # self-hosted runners don't (exit 127 on ms02 without this).
-    - name: Setup Node (per-binary upload toolkit)
+    # Stage the nested JS action into the caller workspace. Relative `uses:`
+    # paths resolve against the workflow repo (not github.action_path), and a
+    # composite `run: node` toolkit does not get ACTIONS_RUNTIME_TOKEN on
+    # self-hosted — `using: node20` does.
+    - name: Stage per-binary upload action
       if: inputs.upload == 'per-binary'
-      uses: actions/setup-node@v4
-      with:
-        node-version: '20'
+      shell: bash
+      run: |
+        set -euo pipefail
+        dest="$GITHUB_WORKSPACE/.octopilot-collect-rust-binaries-upload-each"
+        rm -rf "$dest"
+        cp -a "${{ github.action_path }}/upload-each" "$dest"
 
     - name: Upload per-binary artifacts
       if: inputs.upload == 'per-binary'
-      shell: bash
-      env:
-        OUT_DIR: ${{ steps.collect.outputs.out-dir }}
-        PROFILE: ${{ inputs.upload-profile }}
-        PREFIX: ${{ inputs.upload-prefix }}
-        RETENTION: ${{ inputs.upload-retention-days }}
-      run: |
-        set -euo pipefail
-        SRC="$OUT_DIR/$PROFILE"
-        if [ ! -d "$SRC" ] || [ -z "$(ls -A "$SRC" 2>/dev/null)" ]; then
-          echo "No $PROFILE binaries under $OUT_DIR — skipping per-binary upload"
-          exit 0
-        fi
-        TOOLDIR="$RUNNER_TEMP/octopilot-artifact-toolkit"
-        if [ ! -d "$TOOLDIR/node_modules/@actions/artifact" ]; then
-          mkdir -p "$TOOLDIR"
-          (cd "$TOOLDIR" && npm init -y >/dev/null 2>&1 && npm install --no-audit --no-fund @actions/artifact@2 >/dev/null)
-        fi
-        # ESM ignores NODE_PATH: run the script FROM the toolkit dir so
-        # Node's walk-up resolution finds $TOOLDIR/node_modules.
-        cp "${{ github.action_path }}/upload-each.mjs" "$TOOLDIR/upload-each.mjs"
-        node "$TOOLDIR/upload-each.mjs" "$SRC" "$PREFIX" "$RETENTION"
+      uses: ./.octopilot-collect-rust-binaries-upload-each
+      with:
+        directory: ${{ steps.collect.outputs.out-dir }}/${{ inputs.upload-profile }}
+        prefix: ${{ inputs.upload-prefix }}
+        retention-days: ${{ inputs.upload-retention-days }}

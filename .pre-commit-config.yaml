@@ -9,6 +9,7 @@ repos:
     hooks:
       - id: tests
         name: Run Tests
-        entry: bash -c 'PYTHONPATH=common pytest tests/'
+        entry: bash -c 'PYTHONPATH=common .venv/bin/pytest tests/'
         language: system
+        pass_filenames: false
         always_run: true

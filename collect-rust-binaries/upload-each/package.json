@@ -1,0 +1,17 @@
+{
+  "name": "collect-rust-binaries-upload-each",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Upload each file in a directory as its own Actions artifact",
+  "main": "index.js",
+  "scripts": {
+    "bundle": "ncc build index.js -o dist --license licenses.txt"
+  },
+  "dependencies": {
+    "@actions/artifact": "^2",
+    "@actions/core": "^1"
+  },
+  "devDependencies": {
+    "@vercel/ncc": "^0.44.0"
+  }
+}

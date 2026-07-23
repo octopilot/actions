@@ -44,10 +44,14 @@ change); acceptable for a cache.
 With `upload: per-binary` the action additionally uploads every collected
 file of `upload-profile` (default `release`) as its **own** run artifact
 named `<upload-prefix><binary>` (default `bin-<binary>`). Plain
-`actions/upload-artifact` is one static step per artifact, so the action
-drives the `@actions/artifact` toolkit from a script (`upload-each.mjs`) —
-N artifacts from one step, delete-then-upload so re-run attempts don't
-collide with their predecessors.
+`actions/upload-artifact` is one static step per artifact, so a nested
+JavaScript action (`upload-each/`, `using: node20`, ncc-bundled) drives N
+uploads via `@actions/artifact`. It is staged into the caller workspace
+(relative `uses:` is workflow-repo-scoped) so the runner injects
+`ACTIONS_RUNTIME_TOKEN` — a composite `run: node …` toolkit does not, and
+fails on self-hosted. Re-runs delete-then-upload so artifact names do not
+collide. Rebuild the bundle after SDK changes:
+`cd upload-each && npm i && npm run bundle`.
 
 Downstream jobs then pull exactly what they need:
 
