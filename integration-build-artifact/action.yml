@@ -10,7 +10,12 @@ inputs:
     description: 'UUID for ttl.sh image/chart naming'
     required: true
   output-path:
-    description: 'Path to write key=value lines (e.g. outputs.txt)'
+    description: >
+      DEPRECATED — key=value sidecar retained only for legacy direct callers.
+      The contract is build_result.json (skaffold build-artifact schema,
+      written by op on every build); consume it directly or via
+      merge-build-results. The sidecar write will be removed at the next
+      major release together with the docker/paketo/helm-to-ttl-sh actions.
     required: false
     default: outputs.txt
   ttl-tag:

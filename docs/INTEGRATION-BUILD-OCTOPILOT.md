@@ -63,3 +63,13 @@ jq -r '.builds[] | select(.imageName == "cronjob-log-monitor") | .tag' build_res
   Replace the matrix of docker-to-ttl-sh / paketo-to-ttl-sh / helm-to-ttl-sh with a single job that runs **octopilot** with `ttl-uuid`. Downstream deploy reads `build_result.json` (e.g. `jq '.builds[] | select(.imageName | endswith("monitor")) | .tag'`) instead of artifact .txt files.
 
 The three ttl-sh actions are **deprecated** in favour of octopilot + ttl-uuid and will be removed once adoption is stable.
+
+## build_result.json is THE contract
+
+`build_result.json` (skaffold's build-artifact schema, written by op on every
+build path) is the single per-leg output contract. The key=value
+`<output_key>.txt` sidecar is deprecated: the pipeline no longer uploads it,
+`integration-build-artifact`'s `output-path` input is retained only for legacy
+direct callers, and the write is removed at the next major release together
+with the ttl-sh actions. Downstream consumption is `merge-build-results` over
+the `integration-*` artifacts, then `jq` by `imageName`.
