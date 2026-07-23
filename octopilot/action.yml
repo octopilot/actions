@@ -160,8 +160,22 @@ runs:
             # is visible inside the container — 'unauthenticated' from GHCR with
             # a bootstrap push having SUCCEEDED in the same job means creds are
             # valid but not reaching the lifecycle.
+            # Registry auth transport: a bind mount of ${HOME}/.docker only
+            # works when the runner and the docker daemon share a filesystem
+            # (true on GitHub-hosted runners). On self-hosted topologies where
+            # the daemon resolves host paths on a DIFFERENT filesystem (runner
+            # in a container/VM talking to an outer daemon), the mount comes up
+            # EMPTY and the lifecycle hits ghcr.io anonymously -> UNAUTHORIZED
+            # on the cache-image write check. So the config CONTENT is passed
+            # via env and materialized inside the container; the mount remains
+            # as a fallback for configs too exotic to inline.
+            DOCKER_CONFIG_CONTENT=""
             if [ -f "${HOME}/.docker/config.json" ]; then
               echo "[auth] runner docker config: present; registries: $(jq -r '.auths | keys | join(",")' "${HOME}/.docker/config.json" 2>/dev/null || echo unparseable)"
+              if jq -e '.credsStore // .credHelpers' "${HOME}/.docker/config.json" >/dev/null 2>&1; then
+                echo "::warning::[auth] docker config uses a credential helper; inlined config may lack secrets (helpers don't run in the build container)"
+              fi
+              DOCKER_CONFIG_CONTENT="$(cat "${HOME}/.docker/config.json")"
             else
               echo "[auth] runner docker config: MISSING (${HOME}/.docker/config.json)"
             fi
@@ -183,9 +197,18 @@ runs:
                 -e OP_PLATFORMS="${INPUT_PLATFORMS}" \
                 -e OP_SBOM_OUTPUT="${INPUT_SBOM_OUTPUT}" \
                 -e OP_CACHE_IMAGE="${INPUT_CACHE_IMAGE}" \
+                -e DOCKER_CONFIG_CONTENT="$DOCKER_CONFIG_CONTENT" \
                 --entrypoint /bin/sh \
                 "$IMAGE" \
-                -c 'echo "[auth] in-container: user=$(id -u) DOCKER_CONFIG=$DOCKER_CONFIG config.json=$([ -f "$DOCKER_CONFIG/config.json" ] && echo visible || echo MISSING)" && \
+                -c 'if [ -n "$DOCKER_CONFIG_CONTENT" ]; then
+                    mkdir -p /tmp/.docker && printf "%s" "$DOCKER_CONFIG_CONTENT" > /tmp/.docker/config.json
+                    export DOCKER_CONFIG=/tmp/.docker
+                    echo "[auth] in-container: DOCKER_CONFIG=$DOCKER_CONFIG (materialized from env)"
+                  else
+                    echo "[auth] in-container: no env config; falling back to mount"
+                  fi && \
+                  echo "[auth] in-container: user=$(id -u) DOCKER_CONFIG=$DOCKER_CONFIG config.json=$([ -f "$DOCKER_CONFIG/config.json" ] && echo visible || echo MISSING)" && \
+                  unset DOCKER_CONFIG_CONTENT && \
                   git config --global --add safe.directory /workspace && \
                   if [ -n "$OP_TTL_UUID" ]; then
                     OP_REPO_ARG=""; OP_EXTRA="--ttl-uuid $OP_TTL_UUID --ttl-tag ${OP_TTL_TAG:-1h}"
