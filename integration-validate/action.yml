@@ -81,10 +81,11 @@ runs:
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
           ~/.rustup/
-        key: ${{ runner.os }}-rust-${{ steps.resolve.outputs.version || 'stable' }}-cargo-deps-v2-${{ hashFiles('**/Cargo.lock') }}
+          build_artifacts/
+        key: ${{ runner.os }}-rust-${{ steps.resolve.outputs.version || 'stable' }}-cargo-deps-v3-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-rust-${{ steps.resolve.outputs.version || 'stable' }}-cargo-deps-v2-
-          ${{ runner.os }}-cargo-deps-v2-
+          ${{ runner.os }}-rust-${{ steps.resolve.outputs.version || 'stable' }}-cargo-deps-v3-
+          ${{ runner.os }}-cargo-deps-v3-
 
     - name: Install mold linker (Rust, Linux)
       if: steps.resolve.outputs.language == 'rust' && runner.os == 'Linux'
@@ -103,6 +104,13 @@ runs:
         CARGO_BUILD_INCREMENTAL: true
         RUSTFLAGS: ${{ runner.os == 'Linux' && '-C link-arg=-fuse-ld=mold' || '' }}
       run: cargo build --release
+
+    - name: Collect Rust binaries into build_artifacts
+      if: steps.resolve.outputs.language == 'rust'
+      shell: bash
+      env:
+        CARGO_TARGET_DIR: ${{ github.workspace }}/target
+      run: bash "${{ github.action_path }}/../collect-rust-binaries/collect.sh"
 
     - name: Setup Go
       if: steps.resolve.outputs.language == 'go'

@@ -62,10 +62,11 @@ runs:
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
           ~/.rustup/
-        key: ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-deps-v2-lib-${{ hashFiles('**/Cargo.lock') }}
+          build_artifacts/
+        key: ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-deps-v3-lib-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-deps-v2-lib-
-          ${{ runner.os }}-cargo-deps-v2-
+          ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-deps-v3-lib-
+          ${{ runner.os }}-cargo-deps-v3-
 
     - name: Build and test (rust)
       if: steps.ctx.outputs.language == 'rust'
@@ -91,6 +92,15 @@ runs:
           cargo test "${SCOPE[@]}"
           echo "::endgroup::"
         fi
+
+    - name: Collect Rust binaries into build_artifacts
+      if: steps.ctx.outputs.language == 'rust'
+      shell: bash
+      working-directory: ${{ steps.ctx.outputs.context }}
+      run: |
+        bash "${{ github.action_path }}/../collect-rust-binaries/collect.sh" \
+          "${{ steps.ctx.outputs.workspace_dir }}/target" \
+          "${GITHUB_WORKSPACE}/build_artifacts"
 
     # ── Python ────────────────────────────────────────────────────────────────
     - name: Setup Python

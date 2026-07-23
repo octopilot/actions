@@ -1,0 +1,44 @@
+name: 'Collect Rust binaries'
+description: >
+  Copy top-level Cargo debug/release binaries (and shared libs) from the
+  target directory into build_artifacts/{debug,release}/ for caching and
+  downstream jobs. Does not copy deps/, incremental/, or *.rlib sidecars.
+inputs:
+  target-dir:
+    description: >
+      Cargo target directory (default: CARGO_TARGET_DIR or workspace target/).
+    required: false
+    default: ''
+  out-dir:
+    description: >
+      Destination directory (default: ${GITHUB_WORKSPACE}/build_artifacts).
+    required: false
+    default: ''
+outputs:
+  out-dir:
+    description: Absolute path to build_artifacts.
+    value: ${{ steps.collect.outputs.out-dir }}
+  count:
+    description: Number of files collected.
+    value: ${{ steps.collect.outputs.count }}
+
+runs:
+  using: composite
+  steps:
+    - name: Collect binaries
+      id: collect
+      shell: bash
+      env:
+        INPUT_TARGET: ${{ inputs.target-dir }}
+        INPUT_OUT: ${{ inputs.out-dir }}
+      run: |
+        set -euo pipefail
+        TARGET="${INPUT_TARGET:-${CARGO_TARGET_DIR:-$GITHUB_WORKSPACE/target}}"
+        OUT="${INPUT_OUT:-$GITHUB_WORKSPACE/build_artifacts}"
+        bash "${{ github.action_path }}/collect.sh" "$TARGET" "$OUT"
+        count=0
+        if [[ -f "$OUT/manifest.txt" ]]; then
+          count="$(grep -c . "$OUT/manifest.txt" || true)"
+        fi
+        echo "out-dir=$OUT" >> "$GITHUB_OUTPUT"
+        echo "count=$count" >> "$GITHUB_OUTPUT"

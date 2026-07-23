@@ -57,10 +57,11 @@ runs:
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
           ~/.rustup/
-        key: ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-deps-v2-bin-${{ hashFiles('**/Cargo.lock') }}
+          build_artifacts/
+        key: ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-deps-v3-bin-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-deps-v2-bin-
-          ${{ runner.os }}-cargo-deps-v2-
+          ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-deps-v3-bin-
+          ${{ runner.os }}-cargo-deps-v3-
 
     - name: Release-build packages and assemble dist (rust)
       id: dist
@@ -98,6 +99,15 @@ runs:
         (cd "$DIST" && sha256sum ./*.tar.gz > SHA256SUMS.txt)
         echo "dist-path=$DIST" >> "$GITHUB_OUTPUT"
         ls -la "$DIST"
+
+    - name: Collect Rust binaries into build_artifacts
+      if: steps.ctx.outputs.language == 'rust'
+      shell: bash
+      working-directory: ${{ steps.ctx.outputs.context }}
+      run: |
+        bash "${{ github.action_path }}/../collect-rust-binaries/collect.sh" \
+          "${{ steps.ctx.outputs.workspace_dir }}/target" \
+          "${GITHUB_WORKSPACE}/build_artifacts"
 
     - name: Unsupported language
       if: steps.ctx.outputs.language != 'rust'

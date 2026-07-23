@@ -101,7 +101,7 @@ runs:
         toolchain: ${{ steps.ctx.outputs.rust_version || 'stable' }}
         components: rustfmt, clippy
 
-    # Cache Cargo registry only (not target/ — multi‑GB uploads stall self-hosted).
+    # Cache Cargo registry + extracted binaries (not target/).
     - name: Cache Cargo dependencies
       if: steps.ctx.outputs.has_rust == 'true'
       uses: actions/cache@v4
@@ -111,10 +111,11 @@ runs:
           ~/.cargo/registry/index/
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
-        key: ${{ runner.os }}-cargo-deps-v2-lint-${{ hashFiles('**/Cargo.lock') }}
+          build_artifacts/
+        key: ${{ runner.os }}-cargo-deps-v3-lint-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-cargo-deps-v2-lint-
-          ${{ runner.os }}-cargo-deps-v2-
+          ${{ runner.os }}-cargo-deps-v3-lint-
+          ${{ runner.os }}-cargo-deps-v3-
 
     - name: Setup Node
       if: steps.ctx.outputs.has_node == 'true'
@@ -170,6 +171,25 @@ runs:
           (cd "$d" && cargo clippy --all-targets --all-features -- -D warnings) \
             || echo "⚠️  Clippy found warnings in ${d} (non-blocking — fix before merge)"
         done
+
+    - name: Collect Rust binaries into build_artifacts
+      if: steps.ctx.outputs.has_rust == 'true'
+      shell: bash
+      run: |
+        OUT="${GITHUB_WORKSPACE}/build_artifacts"
+        SCRIPT="${{ github.action_path }}/../collect-rust-binaries/collect.sh"
+        rm -rf "$OUT"
+        first=1
+        for d in "${GITHUB_WORKSPACE}" ${{ steps.ctx.outputs.rust_workdirs }}; do
+          [[ -d "$d/target" ]] || continue
+          if [[ "$first" -eq 1 ]]; then
+            bash "$SCRIPT" "$d/target" "$OUT"
+            first=0
+          else
+            COLLECT_APPEND=1 bash "$SCRIPT" "$d/target" "$OUT"
+          fi
+        done
+        [[ "$first" -eq 0 ]] || mkdir -p "$OUT"
 
     # ── Go: run golangci-lint via its dedicated action ────────────────────────
     # The pre-commit golangci-lint hook runs inside its own sandboxed virtual
