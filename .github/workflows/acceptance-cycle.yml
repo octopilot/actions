@@ -1,0 +1,264 @@
+name: Octopilot Acceptance Cycle
+
+# Reusable per-environment acceptance cycle, modelled on the sam projects'
+# deployment pipeline (commit-cycle -> acceptance-cycle-dev -> pp -> prod):
+# each environment hop PROMOTES the released artifacts from the previous
+# environment's registry, DEPLOYS them, and runs ACCEPTANCE TESTS — and a
+# repo's deploy pipeline is a chain of calls to this workflow, one per
+# environment, each carrying that environment's per-project config (registry,
+# WIF identity, cluster). GitHub environment protection rules give the
+# approval gates.
+#
+# The GHCR dev gate (the pipeline's tag-gated Release job) is hop zero: the
+# first acceptance cycle promotes FROM ghcr.io/<owner> (default source) into
+# the environment's GCP Artifact Registry. Later hops promote from the
+# previous environment's registry. Every hop is digest-pinned (crane): the
+# digests deployed to prod are the digests that passed integration in CI.
+#
+# Example caller (repo's .github/workflows/deploy.yml), sam-style chain:
+#
+#   name: Deploy
+#   on:
+#     workflow_dispatch:
+#       inputs:
+#         version: { description: "Released tag (e.g. v1.2.3)", required: true }
+#   jobs:
+#     staging:
+#       uses: octopilot/actions/.github/workflows/acceptance-cycle.yml@main
+#       with:
+#         version: ${{ inputs.version }}
+#         environment: staging
+#         registry: europe-west2-docker.pkg.dev/myproj-staging/myrepo
+#         workload_identity_provider: projects/…/providers/github
+#         service_account: octopilot-deploy@myproj-staging.iam.gserviceaccount.com
+#         gke_cluster: myproj-staging-cluster
+#         gke_location: europe-west2
+#         project_id: myproj-staging
+#       secrets: inherit
+#     production:
+#       needs: [staging]
+#       uses: octopilot/actions/.github/workflows/acceptance-cycle.yml@main
+#       with:
+#         version: ${{ inputs.version }}
+#         environment: production
+#         registry: europe-west2-docker.pkg.dev/myproj-prod/myrepo
+#         source_registry: europe-west2-docker.pkg.dev/myproj-staging/myrepo
+#         workload_identity_provider: projects/…/providers/github
+#         service_account: octopilot-deploy@myproj-prod.iam.gserviceaccount.com
+#         gke_cluster: myproj-prod-cluster
+#         gke_location: europe-west2
+#         project_id: myproj-prod
+#       secrets: inherit
+#
+# Deploy and test stages are convention-driven and opt-in:
+#   • deploy runs only when gke_cluster is set — it reconciles the app's Flux
+#     HelmRelease(s) and waits for rollout (adapted from WaaS watch_progress);
+#   • acceptance tests run only when hack/acceptance-tests.sh exists — it
+#     receives ENVIRONMENT and VERSION.
+# Promotion alone (registry + WIF, no cluster) is a valid cycle while an
+# environment's cluster is still being stood up.
+
+on:
+  workflow_call:
+    inputs:
+      version:
+        description: Released tag to promote/deploy (must have a GitHub Release with a release_result.json asset).
+        type: string
+        required: true
+      environment:
+        description: GitHub environment name (approval gates via environment protection rules).
+        type: string
+        required: true
+      registry:
+        description: >
+          This environment's registry/repository, e.g.
+          europe-west2-docker.pkg.dev/<project>/<repo>. Images land at
+          <registry>/<basename>:<version>.
+        type: string
+        required: true
+      source_registry:
+        description: >
+          Registry namespace to promote FROM: the previous environment's
+          registry, or empty for the GHCR dev gate (ghcr.io/<repository owner>).
+        type: string
+        default: ''
+      workload_identity_provider:
+        description: Full WIF provider resource name (projects/.../providers/...).
+        type: string
+        required: true
+      service_account:
+        description: Service account email to impersonate (artifactregistry.writer; GKE access when deploying).
+        type: string
+        required: true
+      gke_cluster:
+        description: GKE cluster name. Empty = promote-only cycle (no deploy).
+        type: string
+        default: ''
+      gke_location:
+        description: GKE cluster location (zone or region).
+        type: string
+        default: ''
+      project_id:
+        description: GCP project id for the cluster.
+        type: string
+        default: ''
+      namespace:
+        description: "Kubernetes namespace of the app (default: repo name)."
+        type: string
+        default: ''
+      rollout_timeout:
+        description: kubectl rollout status timeout per deployment.
+        type: string
+        default: 15m
+      runner:
+        description: Runner label string or JSON array string (same convention as the pipeline).
+        type: string
+        default: ubuntu-latest
+
+jobs:
+  acceptance:
+    name: Acceptance (${{ inputs.environment }})
+    runs-on: ${{ (startsWith(inputs.runner, '[') && fromJSON(inputs.runner)) || inputs.runner }}
+    environment: ${{ inputs.environment }}
+    timeout-minutes: 60
+    permissions:
+      id-token: write   # WIF OIDC exchange
+      contents: read    # release asset download + acceptance test sources
+      packages: read    # pull from GHCR (first hop)
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.version }}
+
+      - name: Download release_result.json from the GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh release download "$VERSION" --pattern release_result.json --clobber
+          jq -e '.builds | length > 0' release_result.json >/dev/null \
+            || { echo "::error::release_result.json for $VERSION has no builds"; exit 1; }
+
+      - name: Authenticate to Google Cloud (WIF)
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ inputs.workload_identity_provider }}
+          service_account: ${{ inputs.service_account }}
+          token_format: access_token
+
+      - name: Install crane
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v crane >/dev/null 2>&1; then
+            echo "crane already installed: $(crane version)"; exit 0
+          fi
+          VER=v0.20.3
+          case "$(uname -m)" in
+            x86_64) ARCH=x86_64 ;;
+            aarch64|arm64) ARCH=arm64 ;;
+            *) echo "::error::unsupported arch $(uname -m)"; exit 1 ;;
+          esac
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL "https://github.com/google/go-containerregistry/releases/download/${VER}/go-containerregistry_Linux_${ARCH}.tar.gz" \
+            | tar -xz -C "$HOME/.local/bin" crane
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Registry logins (source pull, destination push)
+        env:
+          GHCR_TOKEN: ${{ github.token }}
+          AR_TOKEN: ${{ steps.auth.outputs.access_token }}
+          DEST_REGISTRY: ${{ inputs.registry }}
+          SOURCE_REGISTRY: ${{ inputs.source_registry }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          # First hop pulls from GHCR; later hops pull from the previous
+          # environment's AR (same WIF token — grant reader on the source).
+          if [ -z "$SOURCE_REGISTRY" ]; then
+            crane auth login ghcr.io -u "$GITHUB_ACTOR" -p "$GHCR_TOKEN"
+          else
+            crane auth login "${SOURCE_REGISTRY%%/*}" -u oauth2accesstoken -p "$AR_TOKEN"
+          fi
+          crane auth login "${DEST_REGISTRY%%/*}" -u oauth2accesstoken -p "$AR_TOKEN"
+
+      # ── Stage 1: promote (digest-pinned; adapted WaaS skaffold_promote_image) ─
+      - name: Promote from source registry
+        env:
+          VERSION: ${{ inputs.version }}
+          DEST_REGISTRY: ${{ inputs.registry }}
+          SOURCE_REGISTRY: ${{ inputs.source_registry }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          SRC_NS="${SOURCE_REGISTRY:-ghcr.io/${GITHUB_REPOSITORY_OWNER}}"
+          {
+            echo "### ${{ inputs.environment }}: promoted \`${VERSION}\` from \`${SRC_NS}\`"
+            echo
+            echo '| artifact | destination | digest |'
+            echo '|---|---|---|'
+          } >> "$GITHUB_STEP_SUMMARY"
+          # release_result.json tags are ghcr.io/<owner>/<base>:<version>@sha256:…
+          # Promote by DIGESTED ref re-rooted onto the source namespace, verify
+          # the destination digest — the released digest is immutable across
+          # every environment hop.
+          jq -r '.builds[] | .tag' release_result.json | while read -r rel; do
+            ref="${rel%%@*}"
+            want="${rel##*@}"
+            base="$(basename "${ref%%:*}")"
+            src="${SRC_NS}/${base}:${VERSION}@${want}"
+            dst="${DEST_REGISTRY}/${base}:${VERSION}"
+            echo "promote: $src -> $dst"
+            crane cp "$src" "$dst"
+            got="$(crane digest "$dst")"
+            if [ "$got" != "$want" ]; then
+              echo "::error::digest mismatch for $base: released $want, destination has $got"
+              exit 1
+            fi
+            echo "| $base | \`$dst\` | \`$got\` |" >> "$GITHUB_STEP_SUMMARY"
+          done
+
+      # ── Stage 2: deploy (opt-in; Flux reconcile + rollout watch) ─────────────
+      - name: Get GKE credentials
+        if: inputs.gke_cluster != ''
+        uses: google-github-actions/get-gke-credentials@v2
+        with:
+          cluster_name: ${{ inputs.gke_cluster }}
+          location: ${{ inputs.gke_location }}
+          project_id: ${{ inputs.project_id }}
+
+      - name: Deploy (reconcile Flux HelmRelease, watch rollout)
+        if: inputs.gke_cluster != ''
+        env:
+          NS_INPUT: ${{ inputs.namespace }}
+          ROLLOUT_TIMEOUT: ${{ inputs.rollout_timeout }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          NS="${NS_INPUT:-${GITHUB_REPOSITORY##*/}}"
+          # GitOps owns the desired state (Flux image automation / the env's
+          # deployment-configuration picks up the promoted tag); this step
+          # forces reconciliation and then watches rollout — adapted from the
+          # WaaS watch_progress function.
+          for hr in $(kubectl get helmrelease -n "$NS" -o name 2>/dev/null); do
+            flux reconcile helmrelease "${hr##*/}" -n "$NS" --timeout=5m
+          done
+          for d in $(kubectl get deploy -n "$NS" -o name 2>/dev/null); do
+            kubectl rollout status "$d" -n "$NS" --timeout "${ROLLOUT_TIMEOUT}"
+          done
+          kubectl get all -n "$NS"
+
+      # ── Stage 3: acceptance tests (opt-in by convention) ─────────────────────
+      - name: Acceptance tests
+        if: inputs.gke_cluster != '' && hashFiles('hack/acceptance-tests.sh') != ''
+        env:
+          ENVIRONMENT: ${{ inputs.environment }}
+          VERSION: ${{ inputs.version }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          chmod +x hack/acceptance-tests.sh
+          ./hack/acceptance-tests.sh

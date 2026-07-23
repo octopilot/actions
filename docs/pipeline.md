@@ -39,6 +39,7 @@ as the source of truth for the application shape:
 | **Integration (validate)** | Release build gate + a UUID for ephemeral artifacts. |
 | **Integration (artifacts)** (matrix) | Builds & pushes each service image (buildpack or Dockerfile) and the Helm chart to **ttl.sh**. |
 | **Integration (deploy)** | *(opt-in)* Stands the app up in Kind via a Flux `HelmRelease` and runs the chart's Helm tests. |
+| **Release (publish)** | *(tags only)* Promotes the run's tested ttl.sh artifacts **by digest** to `ghcr.io/<owner>/<basename>:<tag>`, uploads `release-build-result` (the released refs, `build_result.json` contract), and creates a GitHub Release — AI notes with `ANTHROPIC_API_KEY`, GitHub-generated notes otherwise — with any binary deliverable dists attached. |
 
 The topology is invariant across repos — only the matrices change — so the DAG
 always looks the same and the workflow never needs to know your languages.
@@ -71,6 +72,49 @@ Secrets are passed with `secrets: inherit`. The pipeline uses (all optional):
 - `SOPS_AGE_KEY` — decrypts the integration DB secret. **The user is responsible
   for adding this** to the repo/org.
 - `ANTHROPIC_API_KEY` — used by AI-generated release notes on tags. **User-supplied.**
+  Absent, the GitHub Release falls back to GitHub's generated notes.
+
+## Release semantics (tags)
+
+Pushing a `v*` tag runs the full DAG and then **Release (publish)**:
+
+- **Promotion, not rebuild.** The exact digests that were built, pushed to
+  ttl.sh, and (with `integration: true`) deployed and Helm-tested in Kind are
+  copied with `crane cp` to `ghcr.io/<owner>/<basename>:<tag>`. Released
+  digests == tested digests; the public ttl.sh hop cannot substitute content
+  because the copy is digest-pinned.
+- **Owner-relative naming.** Targets use `github.repository_owner`, so a fork's
+  tag releases into the fork's own GHCR namespace — fork-safe like the rest of
+  the pipeline.
+- **`release-build-result` artifact** (90-day retention) carries the released
+  refs in the `build_result.json` contract for downstream deploy tooling.
+- **Constraint:** ttl.sh refs expire (~1h). Re-running just the release job
+  much later will fail — re-run the whole workflow from the tag instead.
+- **Permissions:** the job needs `contents: write` (GitHub Release) and
+  `packages: write` (GHCR push) from the caller's token; org-default
+  read/write permissions suffice.
+
+## Environment promotion — the acceptance cycle
+
+GHCR is the **dev gate** only. Further environments each target a per-project
+GCP Artifact Registry via the reusable
+`octopilot/actions/.github/workflows/acceptance-cycle.yml` — one call per
+environment, chained sam-style (staging `needs:` nothing, production `needs:
+staging`), each hop doing **promote → deploy → acceptance-test**:
+
+- **Promote** copies the released digests from the previous hop's registry
+  (GHCR for the first hop, the prior environment's AR after) into this
+  environment's registry — digest-pinned `crane cp`, verified after copy, ref
+  list from the release's `release_result.json` asset.
+- **Deploy** (opt-in: set `gke_cluster`) reconciles the app's Flux
+  HelmRelease(s) and watches rollout.
+- **Acceptance tests** run `hack/acceptance-tests.sh` when present
+  (receives `ENVIRONMENT`, `VERSION`).
+
+Per-project config (registry, WIF provider, service account, cluster) lives in
+the caller; GitHub environment protection rules provide the approval gates.
+Auth is keyless (Workload Identity Federation). See the header of
+`acceptance-cycle.yml` for a complete caller example.
 
 ## `integration: true` — the conventions
 

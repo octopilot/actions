@@ -27,8 +27,11 @@ name: Octopilot Pipeline
 #     build:
 #       uses: octopilot/actions/.github/workflows/pipeline.yml@v1
 #       secrets: inherit
-# then add repo-specific jobs (deploy, release) that `needs: build` and download
-# the `integration-*` artifacts this workflow uploads.
+# then add repo-specific jobs (e.g. an environment deploy) that `needs: build`
+# and download the `integration-*` / `release-build-result` artifacts this
+# workflow uploads. Tag pushes (refs/tags/*) additionally run the built-in
+# release job: the run's own tested ttl.sh artifacts are promoted by digest to
+# ghcr.io/<owner>/* and a GitHub Release is created.
 #
 # Concurrency lives in the CALLER (its run is the unit of cancellation);
 # a reusable workflow cannot meaningfully group across callers.
@@ -157,7 +160,8 @@ jobs:
 
       # Deliverable legs (meta-build functions routed by reserved suffix):
       # lib = "build and test it all" / verified rev; binary = release
-      # binaries + dist assembly. Tag-gated publishing lands in a later phase.
+      # binaries + dist assembly. On tags, the release job attaches the
+      # uploaded dists to the GitHub Release.
       - name: Verify lib deliverable
         if: matrix.kind == 'deliverable' && matrix.type == 'lib'
         uses: octopilot/actions/deliverable-lib@main
@@ -462,3 +466,157 @@ jobs:
             echo "::endgroup::"
             exit 1
           fi
+
+  # ── 5. Release (tag-gated: promote tested artifacts + GitHub Release) ───────
+  # Runs ONLY on refs/tags/*. Promotion, not rebuild: the integration artifacts
+  # this very run built, pushed to ttl.sh, and (when integration=true) deployed
+  # and Helm-tested in Kind are copied BY DIGEST to ghcr.io/<owner>/<basename>
+  # with the tag name as the image tag — the released digests are exactly the
+  # tested digests ("test what you ship"). The digest pin also means the public
+  # ttl.sh hop cannot substitute content. Constraint: ttl.sh refs live ~1h, so
+  # a release-job re-run long after the build must re-run the whole workflow.
+  #
+  # integration-validate is in `needs` deliberately: when the integration
+  # matrix is empty (no images), integration-artifacts is skipped and would
+  # otherwise sever the lint/test gate; validate always runs and carries it.
+  release:
+    name: Release (publish)
+    needs: [detect, integration-validate, integration-artifacts, integration-deploy]
+    if: >-
+      !cancelled() && startsWith(github.ref, 'refs/tags/') &&
+      needs.integration-validate.result == 'success' &&
+      (needs.integration-artifacts.result == 'success' || needs.integration-artifacts.result == 'skipped') &&
+      (needs.integration-deploy.result == 'success' || needs.integration-deploy.result == 'skipped')
+    runs-on: ${{ (startsWith(inputs.runner, '[') && fromJSON(inputs.runner)) || inputs.runner }}
+    # Hard cap — a hung copy must fail the job, not burn 6h of runner time.
+    timeout-minutes: 30
+    # contents: write → create the GitHub Release; packages: write → push the
+    # promoted images/chart to GHCR. Caller token must allow both (org default
+    # read/write does; restricted callers set them on the caller job).
+    permissions:
+      contents: write
+      packages: write
+    # Surfaced via env so steps can gate on presence — the `secrets` context is
+    # not permitted in step `if:` expressions.
+    env:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # previous-tag + release notes need full tag history
+
+      - name: Download integration artifact outputs
+        if: needs.integration-artifacts.result == 'success'
+        uses: actions/download-artifact@v4
+        with:
+          pattern: integration-*
+          path: artifact-outputs
+
+      - name: Merge build_result.json
+        if: needs.integration-artifacts.result == 'success'
+        uses: octopilot/actions/merge-build-results@main
+        with:
+          directory: artifact-outputs
+          output-path: build_result.json
+
+      - name: Login to GHCR
+        if: needs.integration-artifacts.result == 'success'
+        shell: bash
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Install crane
+        if: needs.integration-artifacts.result == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          if command -v crane >/dev/null 2>&1; then
+            echo "crane already installed: $(crane version)"; exit 0
+          fi
+          VER=v0.20.3
+          case "$(uname -m)" in
+            x86_64) ARCH=x86_64 ;;
+            aarch64|arm64) ARCH=arm64 ;;
+            *) echo "::error::unsupported arch $(uname -m)"; exit 1 ;;
+          esac
+          mkdir -p "$HOME/.local/bin"
+          curl -fsSL "https://github.com/google/go-containerregistry/releases/download/${VER}/go-containerregistry_Linux_${ARCH}.tar.gz" \
+            | tar -xz -C "$HOME/.local/bin" crane
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+      - name: Promote tested artifacts to GHCR (digest-pinned)
+        if: needs.integration-artifacts.result == 'success'
+        shell: bash
+        run: |
+          set -euo pipefail
+          VERSION="${GITHUB_REF_NAME}"
+          OWNER="${GITHUB_REPOSITORY_OWNER}"
+          : > promoted.tsv
+          # imageName is the skaffold-declared name (may carry a registry);
+          # the release target is always ghcr.io/<owner>/<basename>:<tag> —
+          # same owner-relative convention as the build cache, so forks
+          # release into their own namespace.
+          jq -r '.builds[] | "\(.imageName)\t\(.tag)"' build_result.json \
+          | while IFS="$(printf '\t')" read -r name src; do
+              base="$(basename "${name%%:*}")"
+              dst="ghcr.io/${OWNER}/${base}:${VERSION}"
+              if ! echo "$src" | grep -q '@sha256:'; then
+                echo "::warning::$name ref is not digest-pinned ($src) — copying by tag"
+              fi
+              echo "promote: $src -> $dst"
+              crane cp "$src" "$dst"
+              digest="$(crane digest "$dst")"
+              printf '%s\t%s@%s\n' "$name" "ghcr.io/${OWNER}/${base}:${VERSION}" "$digest" >> promoted.tsv
+            done
+          # Same contract as build_result.json, with released (ghcr) refs.
+          jq -Rn '{builds: [inputs | split("\t") | {imageName: .[0], tag: .[1]}]}' \
+            < promoted.tsv > release_result.json
+          {
+            echo "### Released to GHCR (\`${VERSION}\`)"
+            echo
+            echo '| artifact | released ref |'
+            echo '|---|---|'
+            jq -r '.builds[] | "| \(.imageName) | `\(.tag)` |"' release_result.json
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Upload release build result
+        if: needs.integration-artifacts.result == 'success'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-build-result
+          path: release_result.json
+          retention-days: 90
+
+      # Binary deliverable dists (uploaded by the test job's deliverable legs)
+      # attach to the GitHub Release. Zero matches is fine — image-only repos.
+      - name: Download binary deliverable dists
+        uses: actions/download-artifact@v4
+        with:
+          pattern: deliverable-*
+          path: dist
+          merge-multiple: true
+
+      - name: Previous tag
+        id: prev_tag
+        uses: octopilot/actions/previous-tag@main
+        with:
+          fallback: "v0.0.0"
+
+      - name: Generate release notes (AI)
+        id: release_notes
+        if: env.ANTHROPIC_API_KEY != ''
+        uses: octopilot/actions/release@main
+        with:
+          version: ${{ github.ref_name }}
+          since_tag: ${{ steps.prev_tag.outputs.tag }}
+          provider: anthropic
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          # AI notes when the key is present; GitHub's generated notes otherwise.
+          body_path: ${{ steps.release_notes.outputs.body_file || '' }}
+          generate_release_notes: ${{ env.ANTHROPIC_API_KEY == '' }}
+          files: |
+            release_result.json
+            dist/**
