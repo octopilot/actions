@@ -79,6 +79,15 @@ on:
         description: "deployment-configuration profile environment to apply (e.g. dev, ci)."
         type: string
         default: dev
+      integration_max_parallel:
+        description: >
+          Cap on concurrently running integration artifact legs. Essential on
+          self-hosted runners with many slots on one machine: an uncapped
+          22-leg buildpack fan-out starves the runner agents of CPU and they
+          lose server communication (jobs die with no step conclusion).
+          0 = unlimited (fine for GitHub-hosted runners, one VM per leg).
+        type: number
+        default: 0
     secrets:
       # Declared (not just inherited) so the secrets context is reliably wired
       # into this workflow across repos/orgs. Callers pass `secrets: inherit`.
@@ -216,6 +225,8 @@ jobs:
     timeout-minutes: 45
     strategy:
       fail-fast: false
+      # 999 == effectively unlimited; max-parallel must be >= 1 so 0 maps up.
+      max-parallel: ${{ inputs.integration_max_parallel > 0 && inputs.integration_max_parallel || 999 }}
       matrix:
         include: ${{ fromJson(needs.detect.outputs.pipeline-context).integration_matrix }}
     steps:
