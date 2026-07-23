@@ -176,20 +176,18 @@ runs:
       if: steps.ctx.outputs.has_rust == 'true'
       shell: bash
       run: |
+        # Append everywhere (no rm -rf, no replace-first-pass): lint builds a
+        # partial set and build_artifacts rides a shared first-writer-wins
+        # cache — replacing would clobber a fuller set from another job.
         OUT="${GITHUB_WORKSPACE}/build_artifacts"
         SCRIPT="${{ github.action_path }}/../collect-rust-binaries/collect.sh"
-        rm -rf "$OUT"
-        first=1
+        found=0
         for d in "${GITHUB_WORKSPACE}" ${{ steps.ctx.outputs.rust_workdirs }}; do
           [[ -d "$d/target" ]] || continue
-          if [[ "$first" -eq 1 ]]; then
-            bash "$SCRIPT" "$d/target" "$OUT"
-            first=0
-          else
-            COLLECT_APPEND=1 bash "$SCRIPT" "$d/target" "$OUT"
-          fi
+          COLLECT_APPEND=1 bash "$SCRIPT" "$d/target" "$OUT"
+          found=1
         done
-        [[ "$first" -eq 0 ]] || mkdir -p "$OUT"
+        [[ "$found" -eq 1 ]] || mkdir -p "$OUT"
 
     # ── Go: run golangci-lint via its dedicated action ────────────────────────
     # The pre-commit golangci-lint hook runs inside its own sandboxed virtual

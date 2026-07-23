@@ -35,6 +35,16 @@ inputs:
     description: Retention for per-binary artifacts.
     required: false
     default: '7'
+  append:
+    description: >
+      "1" (default) merges collected binaries ONTO the existing
+      build_artifacts tree instead of wiping it first. Essential when
+      build_artifacts rides a shared actions/cache: partial builds (a test
+      leg that only compiled the crates its features touch) must not replace
+      the fuller set a whole-workspace build collected — caches are
+      first-writer-wins per key. Set "0" for replace semantics.
+    required: false
+    default: '1'
 outputs:
   out-dir:
     description: Absolute path to build_artifacts.
@@ -52,6 +62,7 @@ runs:
       env:
         INPUT_TARGET: ${{ inputs.target-dir }}
         INPUT_OUT: ${{ inputs.out-dir }}
+        COLLECT_APPEND: ${{ inputs.append }}
       run: |
         set -euo pipefail
         TARGET="${INPUT_TARGET:-${CARGO_TARGET_DIR:-$GITHUB_WORKSPACE/target}}"

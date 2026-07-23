@@ -97,6 +97,8 @@ runs:
       if: steps.ctx.outputs.language == 'rust'
       shell: bash
       working-directory: ${{ steps.ctx.outputs.context }}
+      env:
+        COLLECT_APPEND: "1"   # partial build; never clobber the shared cache tree
       run: |
         bash "${{ github.action_path }}/../collect-rust-binaries/collect.sh" \
           "${{ steps.ctx.outputs.workspace_dir }}/target" \

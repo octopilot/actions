@@ -217,6 +217,9 @@ runs:
       shell: bash
       env:
         CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        # Append: a test leg only compiles the crates its features touch —
+        # it must not replace the fuller set in the shared cache tree.
+        COLLECT_APPEND: "1"
       run: bash "${{ github.action_path }}/../collect-rust-binaries/collect.sh"
 
     - name: Run Tests (Python) with coverage

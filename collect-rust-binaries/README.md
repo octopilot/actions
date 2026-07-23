@@ -30,6 +30,15 @@ Or as a composite: `octopilot/actions/collect-rust-binaries@main`.
 
 Set `COLLECT_APPEND=1` to merge another target tree without wiping.
 
+**Append is the default across the pipeline.** Every collecting job (lint,
+test legs, deliverables, validate) restores the same `cargo-deps` cache
+family, and GitHub caches are first-writer-wins per key — so a partial build
+(e.g. a BDD leg that only compiled the 8 crates its features touch) must
+merge onto the restored `build_artifacts` tree, never replace it. Append mode
+also dedupes manifest lines for re-collected files. Stale binaries from
+deleted/renamed crates linger until the cache key rotates (Cargo.lock
+change); acceptable for a cache.
+
 ## Per-binary artifacts
 
 With `upload: per-binary` the action additionally uploads every collected

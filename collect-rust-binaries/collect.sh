@@ -63,6 +63,10 @@ for profile in debug release; do
       else
         sum="nosha"
       fi
+      # Append mode: drop any stale manifest line for this file first.
+      if [[ "${COLLECT_APPEND:-0}" == "1" ]] && grep -q "^${profile}/${base}  " "$manifest" 2>/dev/null; then
+        grep -v "^${profile}/${base}  " "$manifest" > "${manifest}.tmp" && mv "${manifest}.tmp" "$manifest"
+      fi
       echo "${profile}/${base}  size=${size}  sha256=${sum}" | tee -a "$manifest"
       collected=$((collected + 1))
     fi
