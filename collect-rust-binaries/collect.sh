@@ -34,6 +34,8 @@ is_collectible() {
   base="$(basename "$f")"
   case "$base" in
     *.d|*.rlib|*.rmeta|*.timestamp|*.stamp) return 1 ;;
+    # BRRTRouter/codegen companion crates (*_gen) — not shippable app binaries.
+    *_gen) return 1 ;;
   esac
   # Top-level Cargo outputs are either executables or shared/static libs.
   if [[ -x "$f" ]]; then

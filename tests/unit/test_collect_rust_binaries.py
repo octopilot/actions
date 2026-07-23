@@ -21,6 +21,7 @@ def test_collects_debug_and_release_bins(tmp_path: Path) -> None:
     out = tmp_path / "build_artifacts"
     _write_exec(target / "debug" / "myapp")
     _write_exec(target / "release" / "myapp")
+    _write_exec(target / "release" / "myapp_gen")
     # Noise that must be ignored
     (target / "debug" / "myapp.d").write_text("dep")
     (target / "debug" / "libmyapp.rlib").write_bytes(b"rlib")
@@ -35,12 +36,14 @@ def test_collects_debug_and_release_bins(tmp_path: Path) -> None:
 
     assert (out / "debug" / "myapp").is_file()
     assert (out / "release" / "myapp").is_file()
+    assert not (out / "release" / "myapp_gen").exists()
     assert not (out / "debug" / "deps").exists()
     assert not (out / "debug" / "myapp.d").exists()
     assert not (out / "debug" / "libmyapp.rlib").exists()
     manifest = (out / "manifest.txt").read_text()
     assert "debug/myapp" in manifest
     assert "release/myapp" in manifest
+    assert "myapp_gen" not in manifest
 
 
 def test_missing_target_is_ok(tmp_path: Path) -> None:
