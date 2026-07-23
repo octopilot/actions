@@ -77,6 +77,14 @@ runs:
 
     # Per-binary artifacts: plain upload-artifact = one static step per
     # artifact, so a toolkit script drives N uploads from one step.
+    # setup-node first: GitHub-hosted images ship node/npm but bare
+    # self-hosted runners don't (exit 127 on ms02 without this).
+    - name: Setup Node (per-binary upload toolkit)
+      if: inputs.upload == 'per-binary'
+      uses: actions/setup-node@v4
+      with:
+        node-version: '20'
+
     - name: Upload per-binary artifacts
       if: inputs.upload == 'per-binary'
       shell: bash
