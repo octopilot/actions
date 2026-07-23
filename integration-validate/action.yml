@@ -105,12 +105,17 @@ runs:
         RUSTFLAGS: ${{ runner.os == 'Linux' && '-C link-arg=-fuse-ld=mold' || '' }}
       run: cargo build --release
 
+    # Collect + upload per-binary artifacts: validate is the canonical
+    # release build of the whole workspace, so this is the ONE place the
+    # per-binary uploads happen — downstream jobs download exactly the
+    # binary they need (actions/download-artifact with name: bin-<binary>)
+    # instead of restoring the whole build_artifacts cache tree.
     - name: Collect Rust binaries into build_artifacts
       if: steps.resolve.outputs.language == 'rust'
-      shell: bash
-      env:
-        CARGO_TARGET_DIR: ${{ github.workspace }}/target
-      run: bash "${{ github.action_path }}/../collect-rust-binaries/collect.sh"
+      uses: octopilot/actions/collect-rust-binaries@main
+      with:
+        target-dir: ${{ github.workspace }}/target
+        upload: per-binary
 
     - name: Setup Go
       if: steps.resolve.outputs.language == 'go'

@@ -14,6 +14,27 @@ inputs:
       Destination directory (default: ${GITHUB_WORKSPACE}/build_artifacts).
     required: false
     default: ''
+  upload:
+    description: >
+      "per-binary" uploads every collected file of `upload-profile` as its OWN
+      run artifact named <upload-prefix><binary> — downstream jobs then
+      download exactly the binary they need (actions/download-artifact with
+      name: bin-<binary>) instead of the whole build_artifacts tree.
+      Default "none" (cache-only behaviour, unchanged).
+    required: false
+    default: 'none'
+  upload-profile:
+    description: Which profile dir to upload per-binary (release or debug).
+    required: false
+    default: 'release'
+  upload-prefix:
+    description: Artifact name prefix for per-binary uploads.
+    required: false
+    default: 'bin-'
+  upload-retention-days:
+    description: Retention for per-binary artifacts.
+    required: false
+    default: '7'
 outputs:
   out-dir:
     description: Absolute path to build_artifacts.
@@ -42,3 +63,28 @@ runs:
         fi
         echo "out-dir=$OUT" >> "$GITHUB_OUTPUT"
         echo "count=$count" >> "$GITHUB_OUTPUT"
+
+    # Per-binary artifacts: plain upload-artifact = one static step per
+    # artifact, so a toolkit script drives N uploads from one step.
+    - name: Upload per-binary artifacts
+      if: inputs.upload == 'per-binary'
+      shell: bash
+      env:
+        OUT_DIR: ${{ steps.collect.outputs.out-dir }}
+        PROFILE: ${{ inputs.upload-profile }}
+        PREFIX: ${{ inputs.upload-prefix }}
+        RETENTION: ${{ inputs.upload-retention-days }}
+      run: |
+        set -euo pipefail
+        SRC="$OUT_DIR/$PROFILE"
+        if [ ! -d "$SRC" ] || [ -z "$(ls -A "$SRC" 2>/dev/null)" ]; then
+          echo "No $PROFILE binaries under $OUT_DIR — skipping per-binary upload"
+          exit 0
+        fi
+        TOOLDIR="$RUNNER_TEMP/octopilot-artifact-toolkit"
+        if [ ! -d "$TOOLDIR/node_modules/@actions/artifact" ]; then
+          mkdir -p "$TOOLDIR"
+          (cd "$TOOLDIR" && npm init -y >/dev/null 2>&1 && npm install --no-audit --no-fund @actions/artifact@2 >/dev/null)
+        fi
+        NODE_PATH="$TOOLDIR/node_modules" node "${{ github.action_path }}/upload-each.mjs" \
+          "$SRC" "$PREFIX" "$RETENTION"
