@@ -283,10 +283,13 @@ jobs:
           op_version: ${{ inputs.op_version }}
           cache_image: ${{ steps.cache.outputs.image || '' }}
 
+      # ONE contract per leg: build_result.json (imageName + digested tag).
+      # The key=value <output_key>.txt sidecar was the deprecated ttl-sh-actions
+      # era format — nothing downstream reads it (deploy and release both go
+      # through merge-build-results); dropped from the artifact.
       - name: Upload artifact outputs
         run: |
           mkdir -p artifact-out
-          mv outputs.txt "artifact-out/${{ matrix.output_key }}.txt" 2>/dev/null || true
           [ -f build_result.json ] && cp build_result.json artifact-out/ || true
 
       - uses: actions/upload-artifact@v4
