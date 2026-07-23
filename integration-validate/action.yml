@@ -81,11 +81,10 @@ runs:
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
           ~/.rustup/
-          target/
-        key: ${{ runner.os }}-rust-${{ steps.resolve.outputs.version || 'stable' }}-cargo-validate-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-rust-${{ steps.resolve.outputs.version || 'stable' }}-cargo-deps-v2-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-rust-${{ steps.resolve.outputs.version || 'stable' }}-cargo-validate-
-          ${{ runner.os }}-cargo-
+          ${{ runner.os }}-rust-${{ steps.resolve.outputs.version || 'stable' }}-cargo-deps-v2-
+          ${{ runner.os }}-cargo-deps-v2-
 
     - name: Install mold linker (Rust, Linux)
       if: steps.resolve.outputs.language == 'rust' && runner.os == 'Linux'

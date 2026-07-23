@@ -57,10 +57,10 @@ runs:
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
           ~/.rustup/
-          target/
-        key: ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-bin-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-deps-v2-bin-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-bin-
+          ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-deps-v2-bin-
+          ${{ runner.os }}-cargo-deps-v2-
 
     - name: Release-build packages and assemble dist (rust)
       id: dist

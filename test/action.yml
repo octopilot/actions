@@ -101,8 +101,8 @@ runs:
       with:
         toolchain: ${{ steps.ctx.outputs.version || 'stable' }}
 
-    # Cache Cargo registry, rustup toolchains/components, and build artefacts for Rust.
-    # Includes ~/.rustup/ so llvm-tools-preview and toolchain are reused across runs.
+    # Cache Cargo registry + rustup only. Never cache target/ — it balloons to
+    # multi‑GB and stalls actions/cache uploads from self-hosted runners.
     - name: Cache Cargo and rustup
       if: steps.ctx.outputs.language == 'rust'
       uses: actions/cache@v4
@@ -113,12 +113,10 @@ runs:
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
           ~/.rustup/
-          target/
-        key: ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-test-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-deps-v2-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-test-
-          ${{ runner.os }}-cargo-test-
-          ${{ runner.os }}-cargo-
+          ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-deps-v2-
+          ${{ runner.os }}-cargo-deps-v2-
 
     - name: Setup Python
       if: steps.ctx.outputs.language == 'python'

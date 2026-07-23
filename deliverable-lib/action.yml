@@ -62,10 +62,10 @@ runs:
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
           ~/.rustup/
-          target/
-        key: ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-lib-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-deps-v2-lib-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-lib-
+          ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-deps-v2-lib-
+          ${{ runner.os }}-cargo-deps-v2-
 
     - name: Build and test (rust)
       if: steps.ctx.outputs.language == 'rust'

@@ -101,8 +101,7 @@ runs:
         toolchain: ${{ steps.ctx.outputs.rust_version || 'stable' }}
         components: rustfmt, clippy
 
-    # Cache Cargo registry and build artefacts.
-    # This is required for both fmt/clippy checks below and any pre-commit Rust hooks.
+    # Cache Cargo registry only (not target/ — multi‑GB uploads stall self-hosted).
     - name: Cache Cargo dependencies
       if: steps.ctx.outputs.has_rust == 'true'
       uses: actions/cache@v4
@@ -112,11 +111,10 @@ runs:
           ~/.cargo/registry/index/
           ~/.cargo/registry/cache/
           ~/.cargo/git/db/
-          target/
-        key: ${{ runner.os }}-cargo-lint-${{ hashFiles('**/Cargo.lock') }}
+        key: ${{ runner.os }}-cargo-deps-v2-lint-${{ hashFiles('**/Cargo.lock') }}
         restore-keys: |
-          ${{ runner.os }}-cargo-lint-
-          ${{ runner.os }}-cargo-
+          ${{ runner.os }}-cargo-deps-v2-lint-
+          ${{ runner.os }}-cargo-deps-v2-
 
     - name: Setup Node
       if: steps.ctx.outputs.has_node == 'true'
