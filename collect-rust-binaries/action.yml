@@ -105,5 +105,7 @@ runs:
           mkdir -p "$TOOLDIR"
           (cd "$TOOLDIR" && npm init -y >/dev/null 2>&1 && npm install --no-audit --no-fund @actions/artifact@2 >/dev/null)
         fi
-        NODE_PATH="$TOOLDIR/node_modules" node "${{ github.action_path }}/upload-each.mjs" \
-          "$SRC" "$PREFIX" "$RETENTION"
+        # ESM ignores NODE_PATH: run the script FROM the toolkit dir so
+        # Node's walk-up resolution finds $TOOLDIR/node_modules.
+        cp "${{ github.action_path }}/upload-each.mjs" "$TOOLDIR/upload-each.mjs"
+        node "$TOOLDIR/upload-each.mjs" "$SRC" "$PREFIX" "$RETENTION"
