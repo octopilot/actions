@@ -88,7 +88,6 @@ runs:
       with:
         ref: ${{ inputs.branch }}
         token: ${{ inputs.token }}
-        persist-credentials: false
 
     - name: Ensure zoneinfo data for ${{ inputs.timezone }}
       shell: bash
@@ -184,7 +183,6 @@ runs:
         VALUES_FILE: ${{ inputs.values_file }}
         KEY: ${{ inputs.key }}
         BRANCH: ${{ inputs.branch }}
-        TOKEN: ${{ inputs.token }}
       run: |
         set -euo pipefail
         git config user.name "github-actions[bot]"
@@ -197,5 +195,5 @@ runs:
         COMMIT_MSG="${{ steps.resolve.outputs.commit_msg }}"
         git add "$VALUES_FILE"
         git commit -m "$COMMIT_MSG"
-        git -c http.extraHeader="Authorization: Bearer $TOKEN" push origin "HEAD:$BRANCH"
+        git push origin "HEAD:$BRANCH"
         echo "commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
