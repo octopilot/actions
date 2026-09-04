@@ -90,6 +90,30 @@ runs:
         token: ${{ inputs.token }}
         persist-credentials: false
 
+    - name: Ensure zoneinfo data for ${{ inputs.timezone }}
+      shell: bash
+      env:
+        TIMEZONE: ${{ inputs.timezone }}
+      run: |
+        set -euo pipefail
+        if python3 -c "import zoneinfo, sys; zoneinfo.ZoneInfo(sys.argv[1])" "$TIMEZONE" 2>/dev/null; then
+          echo "System zoneinfo OK for $TIMEZONE"
+          exit 0
+        fi
+        echo "::warning::System python3 has no zoneinfo data for $TIMEZONE - installing the tzdata package fallback"
+        export PIP_DISABLE_PIP_VERSION_CHECK=1
+        TZDATA_DIR="${RUNNER_TEMP:-/tmp}/tzdata"
+        python3 -m pip install --quiet --target "$TZDATA_DIR" tzdata \
+          || python3 -m pip install --quiet --target "$TZDATA_DIR" --break-system-packages tzdata \
+          || true
+        if PYTHONPATH="$TZDATA_DIR" python3 -c "import zoneinfo, sys; zoneinfo.ZoneInfo(sys.argv[1])" "$TIMEZONE" 2>/dev/null; then
+          echo "SCALE_TZDATA=$TZDATA_DIR" >> "$GITHUB_ENV"
+          echo "tzdata package fallback works for $TIMEZONE"
+          exit 0
+        fi
+        echo "::error::Could not load $TIMEZONE from system zoneinfo or the tzdata package (pip/network failure?)"
+        exit 1
+
     - name: Resolve day/night decision and update values file
       id: resolve
       shell: bash
@@ -108,6 +132,9 @@ runs:
         CRON_BAND: ${{ inputs.cron_band }}
       run: |
         set -euo pipefail
+        if [ -n "${SCALE_TZDATA:-}" ]; then
+          export PYTHONPATH="$SCALE_TZDATA${PYTHONPATH:+:$PYTHONPATH}"
+        fi
         python3 "${GITHUB_ACTION_PATH}/resolve_scale.py" \
           --values-file "$VALUES_FILE" \
           --key "$KEY" \
@@ -147,6 +174,7 @@ runs:
                 ;;
             esac
           done < "$GITHUB_OUTPUT"
+          }
         fi
 
     - name: Commit and push
