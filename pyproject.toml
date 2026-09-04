@@ -62,6 +62,8 @@ ignore = [
 "*/rotate_secret.py" = ["T201"]
 "*/auth_kubernetes.py" = ["T201"]
 "*/gke_updater.py" = ["T201"]
+# Runs on the runner's system python3 (3.10 on ubuntu-latest): no py311+ syntax
+"*/resolve_scale.py" = ["UP017"]
 "*/eks_updater.py" = ["T201"]
 "*/aks_updater.py" = ["T201"]
 "*/read_properties.py" = ["T201"]

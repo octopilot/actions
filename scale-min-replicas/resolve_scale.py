@@ -15,9 +15,14 @@ from __future__ import annotations
 import argparse
 import re
 import sys
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import NoReturn
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+try:
+    from datetime import UTC
+except ImportError:  # Python < 3.11 (ubuntu-latest runners ship 3.10)
+    UTC = timezone.utc
 
 SUNDAY = 6
 WEEKDAY_NAMES = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"]
