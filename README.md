@@ -20,6 +20,7 @@ Official GitHub Actions for the Octopilot ecosystem. This monorepo contains a su
 | [**is-tag**](is-tag/README.md) | Checks if the current commit is a tag. |
 | [**previous-tag**](previous-tag/README.md) | Finds the previous tag relative to the current commit. |
 | [**kotlin-lint**](kotlin-lint/README.md) | Runs ktlint with Checkstyle XML and PR annotations via action-ktlint. |
+| [**scale-min-replicas**](scale-min-replicas/README.md) | DST- and timezone-aware day/night scaling of a Helm values key (e.g. `minReplicas`) with Sunday-rest hold, safe-UTC-cron-band computation, and commit + push. |
 
 ## Usage
 

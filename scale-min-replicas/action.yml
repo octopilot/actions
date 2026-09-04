@@ -1,0 +1,173 @@
+name: 'scale-min-replicas'
+description: >
+  DST- and timezone-aware day/night scaling of a Helm values key (e.g. minReplicas).
+  Decides the target value from the local wall clock (any IANA timezone), applies it
+  to a values file, and commits + pushes. Respects a Sunday-rest hold and supports
+  an explicit override for manual dispatches.
+inputs:
+  values_file:
+    description: 'Path to the Helm values file, relative to the workspace root.'
+    required: true
+  key:
+    description: 'YAML key to update (matched at any indentation, comment preserved).'
+    required: false
+    default: 'minReplicas'
+  timezone:
+    description: 'IANA timezone of the business location (e.g. Europe/Berlin, America/New_York).'
+    required: true
+  sunrise_hour:
+    description: 'Local hour (0-23) the day window opens.'
+    required: true
+  sunset_hour:
+    description: 'Local hour (0-23) the day window closes. May be <= sunrise_hour for wrap-around windows.'
+    required: true
+  daytime_min_replicas:
+    description: 'Value applied during the day window.'
+    required: true
+  nighttime_min_replicas:
+    description: 'Value applied outside the day window.'
+    required: true
+  sunday_rest:
+    description: "Hold nighttime value on Sundays ('true' or 'false')."
+    required: false
+    default: 'false'
+  min_replicas:
+    description: 'Explicit override (manual dispatch). Empty = auto day/night decision.'
+    required: false
+    default: ''
+  commit_prefix:
+    description: 'Commit message prefix.'
+    required: false
+    default: 'chore(prod)'
+  branch:
+    description: 'Branch to check out and push to.'
+    required: false
+    default: 'master'
+  token:
+    description: 'GitHub token with contents:write.'
+    required: false
+    default: ${{ github.token }}
+  event:
+    description: "Commit message event tag: 'schedule' or 'workflow_dispatch'."
+    required: false
+    default: 'schedule'
+  cron_band:
+    description: "Compute and report safe UTC cron hours for this window ('true'/'false')."
+    required: false
+    default: 'true'
+outputs:
+  decision:
+    description: 'Resolved decision: daytime, nighttime, sunday-rest, or explicit.'
+    value: ${{ steps.resolve.outputs.decision }}
+  resolved_min_replicas:
+    description: 'The value applied (or that would be applied).'
+    value: ${{ steps.resolve.outputs.resolved_min_replicas }}
+  local_time:
+    description: 'Local wall-clock time at decision (ISO 8601, seconds precision).'
+    value: ${{ steps.resolve.outputs.local_time }}
+  utc_offset:
+    description: 'UTC offset in effect at decision time (HH:MM), DST applied.'
+    value: ${{ steps.resolve.outputs.utc_offset }}
+  weekday:
+    description: 'Weekday name at decision time.'
+    value: ${{ steps.resolve.outputs.weekday }}
+  changed:
+    description: "'true' if the values file was modified."
+    value: ${{ steps.resolve.outputs.changed }}
+  commit_sha:
+    description: 'SHA of the created commit; empty on no-op.'
+    value: ${{ steps.push.outputs.commit_sha }}
+  cron_band:
+    description: 'Safe UTC cron hours for sunrise/sunset across every offset the zone has used.'
+    value: ${{ steps.resolve.outputs.cron_band }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Checkout target branch
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ inputs.branch }}
+        token: ${{ inputs.token }}
+        persist-credentials: false
+
+    - name: Resolve day/night decision and update values file
+      id: resolve
+      shell: bash
+      env:
+        VALUES_FILE: ${{ inputs.values_file }}
+        KEY: ${{ inputs.key }}
+        TIMEZONE: ${{ inputs.timezone }}
+        SUNRISE: ${{ inputs.sunrise_hour }}
+        SUNSET: ${{ inputs.sunset_hour }}
+        DAY: ${{ inputs.daytime_min_replicas }}
+        NIGHT: ${{ inputs.nighttime_min_replicas }}
+        SUNDAY_REST: ${{ inputs.sunday_rest }}
+        OVERRIDE: ${{ inputs.min_replicas }}
+        COMMIT_PREFIX: ${{ inputs.commit_prefix }}
+        EVENT: ${{ inputs.event }}
+        CRON_BAND: ${{ inputs.cron_band }}
+      run: |
+        set -euo pipefail
+        python3 "${GITHUB_ACTION_PATH}/resolve_scale.py" \
+          --values-file "$VALUES_FILE" \
+          --key "$KEY" \
+          --timezone "$TIMEZONE" \
+          --sunrise "$SUNRISE" \
+          --sunset "$SUNSET" \
+          --day "$DAY" \
+          --night "$NIGHT" \
+          --sunday-rest "$SUNDAY_REST" \
+          --override "$OVERRIDE" \
+          --commit-prefix "$COMMIT_PREFIX" \
+          --event "$EVENT" \
+          --output "$GITHUB_OUTPUT"
+        if [ "$CRON_BAND" = "true" ]; then
+          echo "Safe UTC cron hours for this window (compare with your schedule):"
+          python3 "${GITHUB_ACTION_PATH}/resolve_scale.py" \
+            --values-file "$VALUES_FILE" \
+            --key "$KEY" \
+            --timezone "$TIMEZONE" \
+            --sunrise "$SUNRISE" \
+            --sunset "$SUNSET" \
+            --day "$DAY" \
+            --night "$NIGHT" \
+            --sunday-rest "$SUNDAY_REST" \
+            --print-cron-band
+        fi
+        if [ -n "$GITHUB_STEP_SUMMARY" ]; then
+          {
+            echo ""
+            echo "## scale-min-replicas"
+            echo ""
+            echo "| Field | Value |"
+            echo "|---|---|"
+            while IFS='=' read -r k v; do
+              case "$k" in decision|resolved_min_replicas|local_time|utc_offset|weekday|changed)
+                echo "| \`$k\` | \`$v\` |"
+                ;;
+            esac
+          done < "$GITHUB_OUTPUT"
+        fi
+
+    - name: Commit and push
+      id: push
+      shell: bash
+      env:
+        VALUES_FILE: ${{ inputs.values_file }}
+        KEY: ${{ inputs.key }}
+        BRANCH: ${{ inputs.branch }}
+        TOKEN: ${{ inputs.token }}
+      run: |
+        set -euo pipefail
+        git config user.name "github-actions[bot]"
+        git config user.email "github-actions[bot]@users.noreply.github.com"
+        if [ "${{ steps.resolve.outputs.changed }}" != "true" ]; then
+          echo "No change to $VALUES_FILE ($KEY already at target) - skipping commit."
+          echo "commit_sha=" >> "$GITHUB_OUTPUT"
+          exit 0
+        fi
+        COMMIT_MSG="${{ steps.resolve.outputs.commit_msg }}"
+        git add "$VALUES_FILE"
+        git commit -m "$COMMIT_MSG"
+        git -c http.extraHeader="Authorization: Bearer $TOKEN" push origin "HEAD:$BRANCH"
+        echo "commit_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"

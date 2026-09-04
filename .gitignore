@@ -11,3 +11,4 @@ htmlcov/
 .pyre_configuration
 .pyre/
 *._*
+*.nfs.*
