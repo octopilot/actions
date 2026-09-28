@@ -88,6 +88,27 @@ on:
           0 = unlimited (fine for GitHub-hosted runners, one VM per leg).
         type: number
         default: 0
+      release_registry:
+        description: >-
+          Registry to release to (release job). Empty = ghcr.io/<owner>. Example: us-docker.pkg.dev/pw-ctl/platform.
+        type: string
+        required: false
+        default: ""
+      registry_auth:
+        description: "How to log in to release_registry: ghcr (GitHub token) | gcp-wif (Workload Identity Federation) | none"
+        type: string
+        required: false
+        default: ghcr
+      gcp_workload_identity_provider:
+        description: "For registry_auth=gcp-wif: projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>"
+        type: string
+        required: false
+        default: ""
+      gcp_service_account:
+        description: For registry_auth=gcp-wif, the service account to impersonate
+        type: string
+        required: false
+        default: ""
     secrets:
       # Declared (not just inherited) so the secrets context is reliably wired
       # into this workflow across repos/orgs. Callers pass `secrets: inherit`.
@@ -510,6 +531,7 @@ jobs:
     permissions:
       contents: write
       packages: write
+      id-token: write
     # Surfaced via env so steps can gate on presence — the `secrets` context is
     # not permitted in step `if:` expressions.
     env:
@@ -533,10 +555,23 @@ jobs:
           directory: artifact-outputs
           output-path: build_result.json
 
-      - name: Login to GHCR
+      - name: Resolve release registry
         if: needs.integration-artifacts.result == 'success'
         shell: bash
-        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+        run: |
+          reg="${{ inputs.release_registry }}"
+          [ -n "$reg" ] || reg="ghcr.io/${GITHUB_REPOSITORY_OWNER}"
+          echo "RELEASE_REGISTRY=${reg%/}" >> "$GITHUB_ENV"
+          echo "release registry: ${reg%/} (auth: ${{ inputs.registry_auth }})"
+      - name: Registry login
+        if: needs.integration-artifacts.result == 'success'
+        uses: octopilot/actions/registry-login@main
+        with:
+          auth: ${{ inputs.registry_auth }}
+          registry: ${{ inputs.release_registry || 'ghcr.io' }}
+          github_token: ${{ github.token }}
+          gcp_workload_identity_provider: ${{ inputs.gcp_workload_identity_provider }}
+          gcp_service_account: ${{ inputs.gcp_service_account }}
 
       - name: Install crane
         if: needs.integration-artifacts.result == 'success'
@@ -557,35 +592,34 @@ jobs:
             | tar -xz -C "$HOME/.local/bin" crane
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
-      - name: Promote tested artifacts to GHCR (digest-pinned)
+      - name: Promote tested artifacts to the release registry (digest-pinned)
         if: needs.integration-artifacts.result == 'success'
         shell: bash
         run: |
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME}"
-          OWNER="${GITHUB_REPOSITORY_OWNER}"
           : > promoted.tsv
           # imageName is the skaffold-declared name (may carry a registry);
-          # the release target is always ghcr.io/<owner>/<basename>:<tag> —
-          # same owner-relative convention as the build cache, so forks
-          # release into their own namespace.
+          # the release target is ${RELEASE_REGISTRY}/<basename>:<tag> — by
+          # default ghcr.io/<owner> (owner-relative, so forks release into
+          # their own namespace), or the registry the caller named.
           jq -r '.builds[] | "\(.imageName)\t\(.tag)"' build_result.json \
           | while IFS="$(printf '\t')" read -r name src; do
               base="$(basename "${name%%:*}")"
-              dst="ghcr.io/${OWNER}/${base}:${VERSION}"
+              dst="${RELEASE_REGISTRY}/${base}:${VERSION}"
               if ! echo "$src" | grep -q '@sha256:'; then
                 echo "::warning::$name ref is not digest-pinned ($src) — copying by tag"
               fi
               echo "promote: $src -> $dst"
               crane cp "$src" "$dst"
               digest="$(crane digest "$dst")"
-              printf '%s\t%s@%s\n' "$name" "ghcr.io/${OWNER}/${base}:${VERSION}" "$digest" >> promoted.tsv
+              printf '%s\t%s@%s\n' "$name" "${RELEASE_REGISTRY}/${base}:${VERSION}" "$digest" >> promoted.tsv
             done
-          # Same contract as build_result.json, with released (ghcr) refs.
+          # Same contract as build_result.json, with released refs.
           jq -Rn '{builds: [inputs | split("\t") | {imageName: .[0], tag: .[1]}]}' \
             < promoted.tsv > release_result.json
           {
-            echo "### Released to GHCR (\`${VERSION}\`)"
+            echo "### Released to ${RELEASE_REGISTRY} (\`${VERSION}\`)"
             echo
             echo '| artifact | released ref |'
             echo '|---|---|'
