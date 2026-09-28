@@ -296,11 +296,9 @@ def synthesize_rust_test_command(context_dir: str) -> str | None:
     has_gen_impl_pairs = any(str(m).endswith("/gen") for m in members) and any(
         str(m).endswith("/impl") for m in members
     )
-    is_brrt_service = uses_brrt and (
-        has_gen_impl_pairs or os.path.isdir(os.path.join(context_dir, "openapi"))
-    )
-    archetype = "brrtrouter-repo" if is_brrt_repo else (
-        "brrtrouter-service" if is_brrt_service else "brrtrouter-consumer"
+    is_brrt_service = uses_brrt and (has_gen_impl_pairs or os.path.isdir(os.path.join(context_dir, "openapi")))
+    archetype = (
+        "brrtrouter-repo" if is_brrt_repo else ("brrtrouter-service" if is_brrt_service else "brrtrouter-consumer")
     )
     sys.stderr.write(f"Rust archetype detected in {context_dir}: {archetype}\n")
 
@@ -343,20 +341,18 @@ def synthesize_rust_test_command(context_dir: str) -> str | None:
         # process starts the shared container in seconds instead of 60-90s of
         # cold build while its five siblings queue on the cross-process lock.
         if musl:
-            parts.append(
-                "cargo build --release -p pet_store --target x86_64-unknown-linux-musl"
-            )
+            parts.append("cargo build --release -p pet_store --target x86_64-unknown-linux-musl")
 
     # Run via nextest (process-per-test isolation) — BRRTRouter's integration
     # tests spin up per-test HTTP servers and coroutine runtimes that interfere
     # under libtest's shared-process threading; nextest is the repo's native
     # runner. Prebuilt binary install keeps this fast (~1s).
     parts.append(
-        '(command -v cargo-nextest >/dev/null 2>&1 || '
+        "(command -v cargo-nextest >/dev/null 2>&1 || "
         'curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C "$HOME/.cargo/bin")'
     )
     parts.append(
-        'cargo llvm-cov nextest --workspace --all-targets --no-fail-fast '
+        "cargo llvm-cov nextest --workspace --all-targets --no-fail-fast "
         '--lcov --output-path "$GITHUB_WORKSPACE/coverage/lcov.info"'
     )
     return " && ".join(parts)
@@ -464,9 +460,7 @@ def build_matrix_include(artifacts: list[dict], repo_root: str) -> list[dict]:
                             leg["soft_fail"] = True
                         extra_leg_by_cmd[leg_key] = leg
                         matrix_include.append(leg)
-                        sys.stderr.write(
-                            f"Parallel test leg ({test_label or short}) for {probe_dir}: {declared_cmd}\n"
-                        )
+                        sys.stderr.write(f"Parallel test leg ({test_label or short}) for {probe_dir}: {declared_cmd}\n")
                 elif test_label:
                     # Same command re-declared with a label: adopt the label.
                     entry["job_label"] = f"Test ({test_label}{advisory}, {lang_label_now})"
@@ -474,7 +468,12 @@ def build_matrix_include(artifacts: list[dict], repo_root: str) -> list[dict]:
                     if soft_fail:
                         entry["soft_fail"] = True
         else:
-            sys.stderr.write(f"Could not detect language for {image} in {context}\n")
+            if os.path.isfile(os.path.join(context_abs, "Dockerfile")):
+                sys.stderr.write(
+                    f"No toolchain for {image} in {context} (docker artifact; built in the integration fan-out only)\n"
+                )
+            else:
+                sys.stderr.write(f"Could not detect language for {image} in {context}\n")
 
     # Archetype inference (declared BP_TEST_COMMAND always wins): rust contexts
     # without a declared command may still need more than a bare `cargo test` —
@@ -539,10 +538,7 @@ def build_integration_matrix(artifacts: list[dict], chart_paths: list[str], repo
             # artifact (e.g. nested-workspace repos) must not garble pack env.
             env = buildpacks.get("env")
             if isinstance(env, list):
-                env = {
-                    k: v
-                    for k, v in (str(e).split("=", 1) for e in env if "=" in str(e))
-                }
+                env = dict(str(e).split("=", 1) for e in env if "=" in str(e))
             if isinstance(env, dict):
                 env_out = {k: v for k, v in env.items() if k != "BP_TEST_COMMAND"}
                 if env_out:
@@ -588,10 +584,7 @@ def build_deliverables_matrix(artifacts: list[dict], repo_root: str) -> list[dic
         image_name = image.split("/")[-1].split(":")[0]
         base = image_name.rsplit("-", 1)[0] or image_name
         short = base.split("-")[-1]
-        if function == "lib":
-            publish = env.get("BP_LIB_PUBLISH", "none")
-        else:
-            publish = "github-release"
+        publish = env.get("BP_LIB_PUBLISH", "none") if function == "lib" else "github-release"
         entry: dict = {
             "type": function,
             "image": image,
@@ -626,14 +619,16 @@ def build_pipeline_context(config: dict, repo_root: str) -> dict:
     chart_paths = detect_helm_charts(repo_root)
     for path in chart_paths:
         name = f"helm-{path}" if path != "." else "helm"
-        matrix_include.append({
-            "name": name,
-            "context": path,
-            "language": "helm",
-            "version": "",
-            "kind": "test",
-            "job_label": f"Test ({path}, helm)",
-        })
+        matrix_include.append(
+            {
+                "name": name,
+                "context": path,
+                "language": "helm",
+                "version": "",
+                "kind": "test",
+                "job_label": f"Test ({path}, helm)",
+            }
+        )
 
     integration_matrix = build_integration_matrix(artifacts, chart_paths, repo_root)
     deliverables_matrix = build_deliverables_matrix(artifacts, repo_root)

@@ -53,7 +53,19 @@ runs:
           [.matrix[] | select(.language != "helm" and .kind != "deliverable")] | .[$idx] // empty
         ')"
         if [ -z "$CTX" ] || [ "$CTX" = "null" ]; then
-          echo "::error::No build context found in pipeline-context.matrix (index $INDEX, non-helm)"
+          # No toolchain context (e.g. a repo that only builds docker: artifacts and/or a chart): fall back to the
+          # first docker image in integration_matrix as a "docker" context. Nothing to compile or smoke here; the
+          # UUID is still minted so the fan-out can build and push it.
+          CTX="$(echo "$PIPELINE_CONTEXT" | jq -c '
+            [.integration_matrix[]? | select(.type == "image" and .build_method == "docker")] | .[0] // empty
+            | {name: ("docker-" + .context), context: .context, language: "docker", version: "", kind: "build"}
+          ')"
+          if [ -n "$CTX" ] && [ "$CTX" != "null" ]; then
+            echo "No toolchain context; validating as docker context $(echo "$CTX" | jq -r .context)"
+          fi
+        fi
+        if [ -z "$CTX" ] || [ "$CTX" = "null" ]; then
+          echo "::error::No build context found in pipeline-context.matrix (index $INDEX, non-helm) and no docker artifact in integration_matrix"
           exit 1
         fi
         echo "context=${CTX}" >> "$GITHUB_OUTPUT"
