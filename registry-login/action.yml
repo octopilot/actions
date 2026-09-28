@@ -1,0 +1,47 @@
+name: Registry login
+description: >-
+  Log Docker in to the registry the pipeline pushes to. `ghcr` uses the GitHub token (default); `gcp-wif` exchanges the
+  job's OIDC token for a Google access token through Workload Identity Federation and logs in to the Artifact Registry
+  host with it (no keys). `none` does nothing. Further providers (aws-oidc, azure-oidc) slot in here.
+inputs:
+  auth:
+    description: ghcr | gcp-wif | none
+    required: false
+    default: ghcr
+  registry:
+    description: Registry (host or host/path) to log in to, e.g. ghcr.io/octopilot or us-docker.pkg.dev/pw-ctl/platform
+    required: false
+    default: ghcr.io
+  github_token:
+    description: Token for ghcr auth
+    required: false
+    default: ""
+  gcp_workload_identity_provider:
+    description: projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>
+    required: false
+    default: ""
+  gcp_service_account:
+    description: Service account to impersonate, e.g. github-actions@pw-ctl.iam.gserviceaccount.com
+    required: false
+    default: ""
+runs:
+  using: composite
+  steps:
+    - name: Login to GHCR
+      if: inputs.auth == 'ghcr'
+      shell: bash
+      run: echo "${{ inputs.github_token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+    - name: Google auth (Workload Identity Federation)
+      if: inputs.auth == 'gcp-wif'
+      id: gcp
+      uses: google-github-actions/auth@v2
+      with:
+        workload_identity_provider: ${{ inputs.gcp_workload_identity_provider }}
+        service_account: ${{ inputs.gcp_service_account }}
+        token_format: access_token
+    - name: Login to Artifact Registry
+      if: inputs.auth == 'gcp-wif'
+      shell: bash
+      run: |
+        host="${{ inputs.registry }}"; host="${host%%/*}"
+        echo "${{ steps.gcp.outputs.access_token }}" | docker login "$host" -u oauth2accesstoken --password-stdin
