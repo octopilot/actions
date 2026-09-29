@@ -68,9 +68,11 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
+          # ttl.sh (anonymous, ephemeral) always: the integration tests run the image from there. GHCR only when the
+          # login step above ran, i.e. not on pull requests (fork PRs have no token with packages:write).
           images: |
-            ghcr.io/octopilot/actions/${{ matrix.action }}
-            ttl.sh/octopilot/actions/${{ matrix.action }}
+            name=ghcr.io/octopilot/actions/${{ matrix.action }},enable=${{ github.event_name != 'pull_request' }}
+            name=ttl.sh/octopilot/actions/${{ matrix.action }}
           tags: |
             type=ref,event=branch
             type=ref,event=tag
@@ -92,15 +94,7 @@ jobs:
         with:
           context: .
           file: ${{ matrix.action }}/Dockerfile
-          # Always push to ttl.sh (which is anonymous & ephemeral), but strict push logic for GHCR handled by meta/login?
-          # Actually build-push-action 'push: true' tries to push to ALL tags.
-          # We need to only push to GHCR if we are allowed.
-          # But we want to ALWAYS push to ttl.sh for tests.
-          # The simplest way is to just set push: true.
-          # However, pushing to ghcr requires login.
-          # If PR, we skip login. So pushing to ghcr will fail if we include it in tags.
-          # We can conditionally set tags.
-          push: true
+          push: true          # tags decide the destinations (see Docker Metadata)
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.action }}
