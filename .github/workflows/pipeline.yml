@@ -213,7 +213,7 @@ jobs:
   integration-artifacts:
     name: Integration (${{ matrix.suffix || matrix.output_key }})
     needs: [detect, integration-validate]
-    if: toJSON(fromJson(needs.detect.outputs.pipeline-context).integration_matrix) != '[]'
+    if: toJSON(fromJson(needs.detect.outputs.pipeline-context).integration_matrix_wave0) != '[]'
     runs-on: ${{ (startsWith(inputs.runner, '[') && fromJSON(inputs.runner)) || inputs.runner }}
     # packages:write lets the job push the pack build-cache image to GHCR
     # (warm buildpack caches across ephemeral runners). Other permissions
@@ -228,7 +228,7 @@ jobs:
       # 999 == effectively unlimited; max-parallel must be >= 1 so 0 maps up.
       max-parallel: ${{ inputs.integration_max_parallel > 0 && inputs.integration_max_parallel || 999 }}
       matrix:
-        include: ${{ fromJson(needs.detect.outputs.pipeline-context).integration_matrix }}
+        include: ${{ fromJson(needs.detect.outputs.pipeline-context).integration_matrix_wave0 }}
     steps:
       - uses: actions/checkout@v4
 
@@ -298,6 +298,107 @@ jobs:
           path: artifact-out
           retention-days: 1
 
+  # ── 4b. Integration artifacts, wave 1: images whose runImage/requires names a wave-0 artifact. They get wave 0's
+  # build_result.json so op resolves the run image to what this run built (pipeline-tools#42), never a stale tag.
+  integration-artifacts-wave1:
+    name: Integration (${{ matrix.suffix || matrix.output_key }})
+    needs: [detect, integration-validate, integration-artifacts]
+    if: toJSON(fromJson(needs.detect.outputs.pipeline-context).integration_matrix_wave1) != '[]'
+    runs-on: ${{ (startsWith(inputs.runner, '[') && fromJSON(inputs.runner)) || inputs.runner }}
+    # packages:write lets the job push the pack build-cache image to GHCR
+    # (warm buildpack caches across ephemeral runners). Other permissions
+    # revert to restrictive defaults once any permission is declared.
+    permissions:
+      contents: read
+      packages: write
+    # Hard cap — a hung test must fail the job, not burn 6h of runner time.
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      # 999 == effectively unlimited; max-parallel must be >= 1 so 0 maps up.
+      max-parallel: ${{ inputs.integration_max_parallel > 0 && inputs.integration_max_parallel || 999 }}
+      matrix:
+        include: ${{ fromJson(needs.detect.outputs.pipeline-context).integration_matrix_wave1 }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pack build-cache as a GHCR image: push + workflow_dispatch only — fork
+      # PRs have no write token, and the cache needs a STABLE name across runs
+      # (ttl.sh's per-run UUIDs are useless for caching). Old op versions
+      # ignore the cache image harmlessly; op v1.0.18+ restores/exports it.
+      - name: Login to GHCR for build cache
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && matrix.type == 'image'
+        shell: bash
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Derive build-cache image name
+        id: cache
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && matrix.type == 'image'
+        shell: bash
+        env:
+          MATRIX_IMAGE: ${{ matrix.image }}
+        run: |
+          base="$(basename "${MATRIX_IMAGE%%:*}")"
+          img="ghcr.io/${GITHUB_REPOSITORY_OWNER}/${base}-buildcache"
+          # GHCR chicken-and-egg: the lifecycle RESTORES (pulls) the cache
+          # image before it ever exports one, and GITHUB_TOKEN gets DENIED
+          # (not 404) pulling a package that has never existed — fatal to the
+          # build. Bootstrap: push a tiny placeholder so the package exists
+          # with the repo association; the lifecycle treats a metadata-less
+          # cache image as empty and overwrites it on first export.
+          # docker import needs a REAL tar stream (raw text -> "unexpected
+          # EOF"), and the whole bootstrap is best-effort: any failure
+          # degrades to a cacheless build instead of failing the job.
+          if ! docker manifest inspect "$img:latest" >/dev/null 2>&1; then
+            echo "Bootstrapping build-cache package (first run): $img"
+            stage="$(mktemp -d)"
+            echo 'octopilot buildcache bootstrap' > "$stage/.octopilot-buildcache-bootstrap"
+            if ! { tar -C "$stage" -cf - . | docker import - "$img:latest" >/dev/null \
+                   && docker push "$img:latest" >/dev/null 2>&1; }; then
+              echo "::warning::build-cache bootstrap failed for $img — building without cache this run"
+              echo "image=" >> "$GITHUB_OUTPUT"
+              rm -rf "$stage"
+              exit 0
+            fi
+            rm -rf "$stage"
+          fi
+          echo "image=$img" >> "$GITHUB_OUTPUT"
+
+      - name: Wave 0 build results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: integration-*
+          path: wave0-outputs
+      - name: Merge wave 0 build results
+        uses: octopilot/actions/merge-build-results@main
+        with:
+          directory: wave0-outputs
+          output-path: wave0-build_result.json
+      - name: Build and push artifact
+        id: build
+        uses: octopilot/actions/integration-build-artifact@main
+        with:
+          artifact: ${{ toJson(matrix) }}
+          ttl-uuid: ${{ needs.integration-validate.outputs.uuid }}
+          op_version: ${{ inputs.op_version }}
+          cache_image: ${{ steps.cache.outputs.image || '' }}
+          from_build_result: wave0-build_result.json
+
+      # ONE contract per leg: build_result.json (imageName + digested tag).
+      # The key=value <output_key>.txt sidecar was the deprecated ttl-sh-actions
+      # era format — nothing downstream reads it (deploy and release both go
+      # through merge-build-results); dropped from the artifact.
+      - name: Upload artifact outputs
+        run: |
+          mkdir -p artifact-out
+          [ -f build_result.json ] && cp build_result.json artifact-out/ || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: integration-${{ matrix.output_key }}
+          path: artifact-out
+          retention-days: 1
+
   # ── 4c. Integration deploy (generic; opt-in via inputs.integration) ─────────
   # Stands the app up in Kind via a Flux HelmRelease, discovering every
   # repo-specific aspect from conventions + build_result.json so this workflow
@@ -312,7 +413,7 @@ jobs:
   #                      that profile's kustomization; skipped without SOPS_AGE_KEY
   integration-deploy:
     name: Integration (deploy)
-    needs: [detect, integration-artifacts]
+    needs: [detect, integration-artifacts, integration-artifacts-wave1]
     if: ${{ inputs.integration }}
     runs-on: ${{ (startsWith(inputs.runner, '[') && fromJSON(inputs.runner)) || inputs.runner }}
     # Hard cap — a hung test must fail the job, not burn 6h of runner time.
@@ -499,7 +600,7 @@ jobs:
     if: >-
       !cancelled() && startsWith(github.ref, 'refs/tags/') &&
       needs.integration-validate.result == 'success' &&
-      (needs.integration-artifacts.result == 'success' || needs.integration-artifacts.result == 'skipped') &&
+      (needs.integration-artifacts.result == 'success' && (needs.integration-artifacts-wave1.result == 'success' || needs.integration-artifacts-wave1.result == 'skipped') || needs.integration-artifacts.result == 'skipped') &&
       (needs.integration-deploy.result == 'success' || needs.integration-deploy.result == 'skipped')
     runs-on: ${{ (startsWith(inputs.runner, '[') && fromJSON(inputs.runner)) || inputs.runner }}
     # Hard cap — a hung copy must fail the job, not burn 6h of runner time.
@@ -520,26 +621,26 @@ jobs:
           fetch-depth: 0   # previous-tag + release notes need full tag history
 
       - name: Download integration artifact outputs
-        if: needs.integration-artifacts.result == 'success'
+        if: needs.integration-artifacts.result == 'success' && (needs.integration-artifacts-wave1.result == 'success' || needs.integration-artifacts-wave1.result == 'skipped')
         uses: actions/download-artifact@v4
         with:
           pattern: integration-*
           path: artifact-outputs
 
       - name: Merge build_result.json
-        if: needs.integration-artifacts.result == 'success'
+        if: needs.integration-artifacts.result == 'success' && (needs.integration-artifacts-wave1.result == 'success' || needs.integration-artifacts-wave1.result == 'skipped')
         uses: octopilot/actions/merge-build-results@main
         with:
           directory: artifact-outputs
           output-path: build_result.json
 
       - name: Login to GHCR
-        if: needs.integration-artifacts.result == 'success'
+        if: needs.integration-artifacts.result == 'success' && (needs.integration-artifacts-wave1.result == 'success' || needs.integration-artifacts-wave1.result == 'skipped')
         shell: bash
         run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Install crane
-        if: needs.integration-artifacts.result == 'success'
+        if: needs.integration-artifacts.result == 'success' && (needs.integration-artifacts-wave1.result == 'success' || needs.integration-artifacts-wave1.result == 'skipped')
         shell: bash
         run: |
           set -euo pipefail
@@ -558,7 +659,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Promote tested artifacts to GHCR (digest-pinned)
-        if: needs.integration-artifacts.result == 'success'
+        if: needs.integration-artifacts.result == 'success' && (needs.integration-artifacts-wave1.result == 'success' || needs.integration-artifacts-wave1.result == 'skipped')
         shell: bash
         run: |
           set -euo pipefail
@@ -593,7 +694,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload release build result
-        if: needs.integration-artifacts.result == 'success'
+        if: needs.integration-artifacts.result == 'success' && (needs.integration-artifacts-wave1.result == 'success' || needs.integration-artifacts-wave1.result == 'skipped')
         uses: actions/upload-artifact@v4
         with:
           name: release-build-result
