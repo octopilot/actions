@@ -68,9 +68,11 @@ jobs:
         id: meta
         uses: docker/metadata-action@v5
         with:
+          # ttl.sh (anonymous, ephemeral) always: the integration tests run the image from there. GHCR only when the
+          # login step above ran, i.e. not on pull requests (fork PRs have no token with packages:write).
           images: |
-            ghcr.io/octopilot/actions/${{ matrix.action }}
-            ttl.sh/octopilot/actions/${{ matrix.action }}
+            name=ghcr.io/octopilot/actions/${{ matrix.action }},enable=${{ github.event_name != 'pull_request' }}
+            name=ttl.sh/octopilot/actions/${{ matrix.action }}
           tags: |
             type=ref,event=branch
             type=ref,event=tag
@@ -92,9 +94,7 @@ jobs:
         with:
           context: .
           file: ${{ matrix.action }}/Dockerfile
-          # PR runs do not log in to GHCR (fork PRs have no token with packages:write), so they build without pushing;
-          # pushes to main and tags log in above and publish.
-          push: ${{ github.event_name != 'pull_request' }}
+          push: true          # tags decide the destinations (see Docker Metadata)
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
           cache-from: type=gha,scope=${{ matrix.action }}
