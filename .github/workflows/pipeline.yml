@@ -463,6 +463,16 @@ jobs:
           for hr in $(kubectl get helmrelease -n "$NS" -o name 2>/dev/null); do
             flux reconcile helmrelease "${hr##*/}" -n "$NS" --timeout=8m || RECONCILE_FAILED=1
           done
+          # Chart tests: helm test runs the chart's own test hooks (a no-op for charts without any), with logs, so a
+          # chart can prove its workload does something, not just that its pods are Running.
+          if [ "$RECONCILE_FAILED" -eq 0 ]; then
+            for hr in $(kubectl get helmrelease -n "$NS" -o name 2>/dev/null); do
+              rel="$(kubectl get "$hr" -n "$NS" -o jsonpath='{.spec.releaseName}')"; rel="${rel:-${hr##*/}}"
+              tns="$(kubectl get "$hr" -n "$NS" -o jsonpath='{.spec.targetNamespace}')"; tns="${tns:-$NS}"
+              echo "helm test $rel -n $tns"
+              helm test "$rel" -n "$tns" --logs --timeout 5m || RECONCILE_FAILED=1
+            done
+          fi
           kubectl get all -n "$NS"
           flux get helmrelease -n "$NS" || true
           if [ "$RECONCILE_FAILED" -ne 0 ]; then
