@@ -414,7 +414,12 @@ jobs:
   integration-deploy:
     name: Integration (deploy)
     needs: [detect, integration-artifacts, integration-artifacts-wave1]
-    if: ${{ inputs.integration }}
+    # Explicit status checks: without a status function GitHub applies success(), which is false when a needed job was
+    # skipped, and wave 1 is skipped whenever no artifact depends on another.
+    if: >-
+      !cancelled() && inputs.integration &&
+      needs.integration-artifacts.result == 'success' &&
+      (needs.integration-artifacts-wave1.result == 'success' || needs.integration-artifacts-wave1.result == 'skipped')
     runs-on: ${{ (startsWith(inputs.runner, '[') && fromJSON(inputs.runner)) || inputs.runner }}
     # Hard cap — a hung test must fail the job, not burn 6h of runner time.
     timeout-minutes: 45
@@ -606,7 +611,7 @@ jobs:
   # otherwise sever the lint/test gate; validate always runs and carries it.
   release:
     name: Release (publish)
-    needs: [detect, integration-validate, integration-artifacts, integration-deploy]
+    needs: [detect, integration-validate, integration-artifacts, integration-artifacts-wave1, integration-deploy]
     if: >-
       !cancelled() && startsWith(github.ref, 'refs/tags/') &&
       needs.integration-validate.result == 'success' &&
