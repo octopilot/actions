@@ -71,7 +71,6 @@ runs:
         ttl-uuid: ${{ inputs.ttl-uuid }}
         ttl-tag: ${{ inputs.ttl-tag }}
         artifact: ${{ steps.parse.outputs.image }}
-        artifact_key: ${{ steps.parse.outputs.suffix }}
         op_version: ${{ inputs.op_version }}
         docker_host: ${{ inputs.docker_host }}
         cache_image: ${{ inputs.cache_image }}
@@ -84,7 +83,6 @@ runs:
         ttl-uuid: ${{ inputs.ttl-uuid }}
         ttl-tag: ${{ inputs.ttl-tag }}
         artifact: ${{ steps.parse.outputs.image }}
-        artifact_key: ${{ steps.parse.outputs.suffix }}
         op_version: ${{ inputs.op_version }}
         docker_host: ${{ inputs.docker_host }}
 
