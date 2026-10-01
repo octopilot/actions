@@ -3,6 +3,10 @@ description: >
   Builds one integration matrix item (image via docker or pack, or chart via helm)
   and writes key=value output(s) to a file for the workflow to upload.
 inputs:
+  from_build_result:
+    description: 'build_result.json of an earlier wave (runImage resolution); passed to op --from-build-result.'
+    required: false
+    default: ''
   artifact:
     description: 'JSON object for one matrix item (type, build_method, context, suffix, output_key, path?, dockerfile?, builder?, build_env?)'
     required: true

@@ -490,6 +490,58 @@ def build_matrix_include(artifacts: list[dict], repo_root: str) -> list[dict]:
     return matrix_include
 
 
+def _image_key(image: str) -> str:
+    """Image reference without tag/digest, for matching runImage/requires against artifact images."""
+    ref = image.split("@", 1)[0]
+    last = ref.rsplit("/", 1)[-1]
+    if ":" in last:
+        ref = ref[: len(ref) - len(last) + last.index(":")]
+    return ref
+
+
+def assign_waves(integration_matrix: list[dict], artifacts: list[dict]) -> None:
+    """Dependencies from skaffold declarations: `requires` and a buildpack `runImage` naming another artifact.
+
+    Each image entry gets `depends_on` (output_keys of the artifacts it needs built first) and `wave` (0 for none, 1 if
+    it depends on wave-0 artifacts). The pipeline builds wave 0, then wave 1 with wave 0's build results, so a run image
+    built in this same run is used rather than a stale published tag. Deeper chains and cycles are rejected: two waves
+    is the pipeline's contract, and a longer chain is a sign the repo should split.
+    """
+    by_image = {_image_key(e["image"]): e for e in integration_matrix if e.get("type") == "image"}
+    decl = {_image_key(a.get("image", "")): a for a in artifacts if a.get("image")}
+    for e in integration_matrix:
+        if e.get("type") != "image":
+            continue
+        a = decl.get(_image_key(e["image"])) or {}
+        deps: list[str] = []
+        bp = a.get("buildpacks") or {}
+        run = bp.get("runImage")
+        if run and _image_key(run) in by_image and _image_key(run) != _image_key(e["image"]):
+            deps.append(by_image[_image_key(run)]["output_key"])
+            e["run_image_from"] = by_image[_image_key(run)]["output_key"]
+        for r in a.get("requires") or []:
+            img = r.get("image") if isinstance(r, dict) else r
+            if img and _image_key(img) in by_image and _image_key(img) != _image_key(e["image"]):
+                deps.append(by_image[_image_key(img)]["output_key"])
+        e["depends_on"] = sorted(set(deps))
+    keys = {e["output_key"]: e for e in integration_matrix if e.get("type") == "image"}
+
+    def wave_of(e: dict, seen: tuple) -> int:
+        if e["output_key"] in seen:
+            raise SystemExit(f"detect-contexts: artifact dependency cycle through {e['image']}")
+        if not e["depends_on"]:
+            return 0
+        return 1 + max(wave_of(keys[d], (*seen, e["output_key"])) for d in e["depends_on"])
+
+    for e in integration_matrix:
+        if e.get("type") == "image":
+            e["wave"] = wave_of(e, ())
+            if e["wave"] > 1:
+                raise SystemExit(
+                    f"detect-contexts: {e['image']} is {e['wave']} deep; the pipeline builds at most two waves"
+                )
+
+
 def build_integration_matrix(artifacts: list[dict], chart_paths: list[str], repo_root: str) -> list[dict]:
     """Build integration matrix (image docker/pack + chart entries) from skaffold artifacts and chart_paths."""
     integration_matrix: list[dict] = []
@@ -514,6 +566,10 @@ def build_integration_matrix(artifacts: list[dict], chart_paths: list[str], repo
             suffix = image_name.split("-", 1)[1] if "-" in image_name else image_name
         if suffix in used_suffixes:
             suffix = image_name
+        if suffix in used_suffixes:
+            raise SystemExit(
+                f"detect-contexts: artifact key {suffix!r} (from {image}) collides with another artifact; rename one"
+            )
         used_suffixes.add(suffix)
         output_key = f"image_{suffix}"
         context_abs = os.path.normpath(os.path.join(repo_root, context))
@@ -525,6 +581,7 @@ def build_integration_matrix(artifacts: list[dict], chart_paths: list[str], repo
             "build_method": build_method,
             "context": context,
             "suffix": suffix,
+            "key": suffix,
             "output_key": output_key,
         }
         if build_method == "docker":
@@ -553,6 +610,7 @@ def build_integration_matrix(artifacts: list[dict], chart_paths: list[str], repo
                 if extra_parts:
                     entry["build_env"] = f"{existing} {' '.join(extra_parts)}".strip()
         integration_matrix.append(entry)
+    assign_waves(integration_matrix, artifacts)
     # Contexts already built as images (e.g. pack with helm buildpack) — skip duplicate chart entry
     artifact_contexts = {os.path.normpath(e["context"]) for e in integration_matrix}
     for path in chart_paths:
@@ -681,6 +739,10 @@ def build_pipeline_context(config: dict, repo_root: str) -> dict:
         "chart_paths": chart_paths,
         "workdirs": workdirs,
         "integration_matrix": integration_matrix,
+        # Waves: chart entries and images with no dependencies build first; images whose runImage/requires names another
+        # artifact build second, with wave 0's build results. Empty wave 1 = the second job is skipped.
+        "integration_matrix_wave0": [e for e in integration_matrix if e.get("wave", 0) == 0],
+        "integration_matrix_wave1": [e for e in integration_matrix if e.get("wave", 0) == 1],
         "deliverables_matrix": deliverables_matrix,
     }
 
@@ -720,6 +782,8 @@ def main() -> None:
             "versions": {},
             "chart_paths": [],
             "integration_matrix": [],
+            "integration_matrix_wave0": [],
+            "integration_matrix_wave1": [],
             "deliverables_matrix": [],
         }
         write_outputs(empty_context, os.environ.get("GITHUB_OUTPUT"))
