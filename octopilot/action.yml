@@ -25,6 +25,10 @@ inputs:
     description: 'Build only this artifact (exact image name from skaffold, e.g. ghcr.io/org/myimage). For matrix/fan-out integration builds.'
     required: false
     default: ''
+  artifact_key:
+    description: 'Short unique key for the artifact (detect-contexts suffix). Passed to op as --artifact-key so the ttl.sh name is ttl.sh/<uuid>-<key>; op derives it with a warning when absent.'
+    required: false
+    default: ''
   op_version:
     description: 'Version of octopilot-pipeline-tools to use (e.g. v1.0.17).'
     required: false
@@ -73,6 +77,7 @@ runs:
         INPUT_TTL_TAG: ${{ inputs.ttl-tag }}
         INPUT_PLATFORMS: ${{ inputs.platforms }}
         INPUT_ARTIFACT: ${{ inputs.artifact }}
+        INPUT_ARTIFACT_KEY: ${{ inputs.artifact_key }}
         INPUT_OP_VERSION: ${{ inputs.op_version }}
         INPUT_SBOM_OUTPUT: ${{ inputs.sbom_output }}
         INPUT_OP_BINARY: ${{ inputs.op_binary }}
@@ -119,7 +124,8 @@ runs:
             chmod +x "${INPUT_OP_BINARY}"
             
             OP_ARTIFACT=""
-            [ -n "${INPUT_ARTIFACT}" ] && OP_ARTIFACT="--artifact ${INPUT_ARTIFACT}"
+            if [ -n "${INPUT_ARTIFACT}" ]; then OP_ARTIFACT="--artifact ${INPUT_ARTIFACT}"; fi
+            if [ -n "${INPUT_ARTIFACT_KEY}" ]; then OP_ARTIFACT="${OP_ARTIFACT} --artifact-key ${INPUT_ARTIFACT_KEY}"; fi
             if [ -n "${INPUT_TTL_UUID}" ]; then
               "${INPUT_OP_BINARY}" build --ttl-uuid "${INPUT_TTL_UUID}" --ttl-tag "${INPUT_TTL_TAG:-1h}" $OP_ARTIFACT --platform "${INPUT_PLATFORMS}" --push --sbom-output "${INPUT_SBOM_OUTPUT}"
             elif [ -n "${INPUT_ARTIFACT}" ] && [ "${INPUT_ARTIFACT#$INPUT_REGISTRY}" != "${INPUT_ARTIFACT}" ]; then
@@ -194,6 +200,7 @@ runs:
                 -e OP_TTL_TAG="${INPUT_TTL_TAG}" \
                 -e OP_REGISTRY="${INPUT_REGISTRY}" \
                 -e OP_ARTIFACT="${INPUT_ARTIFACT}" \
+                -e OP_ARTIFACT_KEY="${INPUT_ARTIFACT_KEY}" \
                 -e OP_PLATFORMS="${INPUT_PLATFORMS}" \
                 -e OP_SBOM_OUTPUT="${INPUT_SBOM_OUTPUT}" \
                 -e OP_CACHE_IMAGE="${INPUT_CACHE_IMAGE}" \
@@ -220,7 +227,8 @@ runs:
                     fi
                     OP_EXTRA=""
                   fi && \
-                  OP_ARTIFACT_ARG=""; [ -n "$OP_ARTIFACT" ] && OP_ARTIFACT_ARG="--artifact $OP_ARTIFACT" && \
+                  OP_ARTIFACT_ARG=""; if [ -n "$OP_ARTIFACT" ]; then OP_ARTIFACT_ARG="--artifact $OP_ARTIFACT"; fi; \
+                  if [ -n "$OP_ARTIFACT_KEY" ]; then OP_ARTIFACT_ARG="$OP_ARTIFACT_ARG --artifact-key $OP_ARTIFACT_KEY"; fi && \
                   op build $OP_REPO_ARG $OP_EXTRA $OP_ARTIFACT_ARG --platform "$OP_PLATFORMS" --push --sbom-output "$OP_SBOM_OUTPUT"'
         fi
 
