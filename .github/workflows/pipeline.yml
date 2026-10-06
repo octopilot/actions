@@ -681,6 +681,11 @@ jobs:
           VERSION="${GITHUB_REF_NAME}"
           OWNER="${GITHUB_REPOSITORY_OWNER}"
           : > promoted.tsv
+          # Helm pushes a chart as <repo>/<chart name>:<version>; build_result may carry the image-style
+          # <repo>:<version> for it, so normalise the source exactly as integration-deploy does.
+          CHART_NAME=""
+          CHART_YAML="$(git ls-files 'Chart.yaml' '**/Chart.yaml' | head -1)"
+          [ -z "$CHART_YAML" ] || CHART_NAME="$(grep -E '^name:' "$CHART_YAML" | sed 's/^name:[[:space:]]*//;s/[[:space:]]*$//')"
           # imageName is the skaffold-declared name (may carry a registry);
           # the release target is always ghcr.io/<owner>/<basename>:<tag> —
           # same owner-relative convention as the build cache, so forks
@@ -688,6 +693,9 @@ jobs:
           jq -r '.builds[] | "\(.imageName)\t\(.tag)"' build_result.json \
           | while IFS="$(printf '\t')" read -r name src; do
               base="$(basename "${name%%:*}")"
+              if [ -n "$CHART_NAME" ] && [[ "$base" == *-chart ]] && ! echo "$src" | grep -qE "/${CHART_NAME}:"; then
+                src="$(echo "$src" | sed "s|-chart:|-chart/${CHART_NAME}:|")"
+              fi
               dst="ghcr.io/${OWNER}/${base}:${VERSION}"
               if ! echo "$src" | grep -q '@sha256:'; then
                 echo "::warning::$name ref is not digest-pinned ($src) — copying by tag"
