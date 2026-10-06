@@ -6,6 +6,11 @@ import tomllib  # Requires Python 3.11+
 
 import yaml
 
+# Immutable builder with octopilot/rust >= 0.1.13 (launch processes, /workspace 0755).
+# Keep in lockstep with integration-build-artifact/action.yml and
+# octopilot-pipeline-tools/docs/image-launch-and-builder-tags.md.
+DEFAULT_BUILDER = "ghcr.io/octopilot/builder-jammy-base:rust-builder-c3c756a"
+
 
 def get_file_content(context_path: str, filename: str) -> str | None:
     try:
@@ -588,7 +593,7 @@ def build_integration_matrix(artifacts: list[dict], chart_paths: list[str], repo
             entry["dockerfile"] = "Dockerfile"
         if build_method == "pack":
             buildpacks = artifact.get("buildpacks") or {}
-            entry["builder"] = buildpacks.get("builder", "paketobuildpacks/builder-jammy-base")
+            entry["builder"] = buildpacks.get("builder", DEFAULT_BUILDER)
             # BP_TEST_COMMAND (may contain spaces) belongs to the lint/test
             # matrix, not the image's space-joined build_env — same exclusion
             # as the deliverables matrix. A declared test command on an image

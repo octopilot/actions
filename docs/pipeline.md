@@ -64,7 +64,7 @@ The result: a contributor can fork, push, and exercise the entire pipeline
 | `integration` | `false` | Run the generic Kind + Flux deploy. Requires the integration bits below. |
 | `namespace` | repo name | Target namespace for the deploy. |
 | `runner` | `ubuntu-latest` | Runner label for all jobs. |
-| `op_version` | `v1.0.17` | Octopilot `op` builder image version. |
+| `op_version` | `v1.1.2` | `ghcr.io/octopilot/op` tag. `latest`, `main`, and `v1.1.2` are different digests. |
 | `actions_ref` | `main` | Ref the composite steps resolve to (pin alongside the workflow for reproducibility). |
 
 Secrets are passed with `secrets: inherit`. The pipeline uses (all optional):
@@ -126,7 +126,9 @@ then discovers everything and needs no per-repo workflow code:
    The chart should:
    - render images from values the overlay injects,
    - carry a **pre-install migration hook** (a Job running your migration binary)
-     if it needs a schema, and
+     if it needs a schema. On a Rust image the hook's `command` is
+     `/cnb/process/<name>` and the main container leaves `command` unset.
+     See [Rust images](rust-images.md),
    - carry a **Helm test hook** (`helm.sh/hook: test`) that smoke-tests the app —
      this is what makes deploy *and* test "free": Flux runs it via
      `spec.test.enable: true` and a failing test fails the deploy.

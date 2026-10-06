@@ -60,7 +60,9 @@ runs:
         echo "image=$(echo "$ARTIFACT" | jq -r '.image // ""')" >> "$GITHUB_OUTPUT"
         echo "path=$(echo "$ARTIFACT" | jq -r '.path // ""')" >> "$GITHUB_OUTPUT"
         echo "dockerfile=$(echo "$ARTIFACT" | jq -r '.dockerfile // "Dockerfile"')" >> "$GITHUB_OUTPUT"
-        echo "builder=$(echo "$ARTIFACT" | jq -r '.builder // "paketobuildpacks/builder-jammy-base"')" >> "$GITHUB_OUTPUT"
+        # Same pin as detect-contexts DEFAULT_BUILDER. See
+        # octopilot-pipeline-tools/docs/image-launch-and-builder-tags.md.
+        echo "builder=$(echo "$ARTIFACT" | jq -r '.builder // "ghcr.io/octopilot/builder-jammy-base:rust-builder-c3c756a"')" >> "$GITHUB_OUTPUT"
         echo "build_env=$(echo "$ARTIFACT" | jq -r '.build_env // ""')" >> "$GITHUB_OUTPUT"
 
     - name: Build and push image (Octopilot)

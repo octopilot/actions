@@ -465,3 +465,24 @@ build:
         assert chart_image["context"] == "chart"
         assert chart_image["output_key"] == "image_chart"
         assert chart_image["build_method"] == "pack"
+
+    def test_pack_artifact_without_builder_uses_octopilot_pin(self, tmp_path, capsys):
+        (tmp_path / "skaffold.yaml").write_text("""apiVersion: skaffold/v4beta7
+kind: Config
+build:
+  artifacts:
+    - image: ghcr.io/org/app
+      context: .
+""")
+        (tmp_path / "Cargo.toml").write_text('[package]\nname = "app"\nversion = "0.1.0"\n')
+
+        with patch.dict(os.environ, {"SKAFFOLD_FILE": str(tmp_path / "skaffold.yaml")}, clear=False):
+            detect.main()
+
+        captured = capsys.readouterr()
+        ctx_str = captured.out.split("pipeline-context=")[1].split("\n")[0]
+        ctx = json.loads(ctx_str)
+        images = [e for e in ctx["integration_matrix"] if e.get("type") == "image"]
+        assert len(images) == 1
+        assert images[0]["builder"] == detect.DEFAULT_BUILDER
+        assert images[0]["builder"].endswith(":rust-builder-c3c756a")

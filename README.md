@@ -22,6 +22,15 @@ Official GitHub Actions for the Octopilot ecosystem. This monorepo contains a su
 | [**kotlin-lint**](kotlin-lint/README.md) | Runs ktlint with Checkstyle XML and PR annotations via action-ktlint. |
 | [**scale-min-replicas**](scale-min-replicas/README.md) | DST- and timezone-aware day/night scaling of a Helm values key (e.g. `minReplicas`) with Sunday-rest hold, safe-UTC-cron-band computation, and commit + push. |
 
+## Documentation
+
+| Guide | What it covers |
+|--------|-------------|
+| [Pipeline](docs/pipeline.md) | The reusable workflow: detect, test, integration, release. |
+| [Rust images](docs/rust-images.md) | Where the binary lands, which process starts it, and why `BP_RUST_BINARY_NAME` is not how you name a service. |
+| [Ecosystem and dependencies](docs/ECOSYSTEM-AND-DEPENDENCIES.md) | `hack/ci-deps`, `hack/test-deps`, and the Flux overlay. |
+| [Integration build](docs/INTEGRATION-BUILD-OCTOPILOT.md) | `build_result.json` and the ttl.sh contract. |
+
 ## Usage
 
 Each action is standalone and can be used directly in your workflows. Please refer to the specific README linked above for inputs, outputs, and examples.
