@@ -108,9 +108,12 @@ On those versions:
   the wrong process. Do not paper over that with `BP_RUST_BINARY_NAME` until
   the buildpack honors it on a successful build.
 
-The follow-up in the buildpack is: keep targets whose Cargo `kind` contains
-`bin`, then apply the table above. Until that ships, prefer one bin per
-image and no `build.rs` in the crate you are packaging.
+`octopilot/rust` 0.1.15 applies that table: only `kind = bin` becomes a
+process, `default-run` and the package name choose `web`, and
+`BP_RUST_BINARY_NAME` is an override that is honored on a successful build.
+A failed prune that drops `bin/<name>` fails the build. 0.1.15 is not in
+builder `rust-builder-c3c756a`. Until a builder is published with it, prefer
+one bin per image and no `build.rs` in the crate you are packaging.
 
 ## Builder
 
