@@ -7,4 +7,4 @@ Builds one integration matrix item (image or Helm chart) via **Octopilot** and w
 
 The **integration matrix** is derived by [detect-contexts](../detect-contexts): from `skaffold.yaml` `build.artifacts` (each entry includes `image` for Octopilot’s `--artifact`) and from detect’s `chart_paths`. The receiving job can merge multiple `build_result.json` files with [merge-build-results](../merge-build-results).
 
-**`op_version`** defaults to `v1.1.2` (same as `pipeline.yml`). `latest` and `main` are not that release. Pack artifacts with no `builder` use `ghcr.io/octopilot/builder-jammy-base:rust-builder-c3c756a`.
+**`op_version`** defaults to `v1.1.2` (same as `pipeline.yml`). `latest` and `main` are not that release. Pack artifacts with no `builder` use `ghcr.io/octopilot/builder-jammy-base:rust-builder-d741287`.

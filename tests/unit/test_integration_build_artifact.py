@@ -17,7 +17,7 @@ def parse_artifact_contract(artifact: dict) -> dict:
         "image": artifact.get("image") or "",
         "path": artifact.get("path") or "",
         "dockerfile": artifact.get("dockerfile", "Dockerfile"),
-        "builder": artifact.get("builder", "ghcr.io/octopilot/builder-jammy-base:rust-builder-c3c756a"),
+        "builder": artifact.get("builder", "ghcr.io/octopilot/builder-jammy-base:rust-builder-d741287"),
         "build_env": artifact.get("build_env") or "",
     }
 

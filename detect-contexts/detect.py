@@ -9,7 +9,7 @@ import yaml
 # Immutable builder with octopilot/rust >= 0.1.13 (launch processes, /workspace 0755).
 # Keep in lockstep with integration-build-artifact/action.yml and
 # octopilot-pipeline-tools/docs/image-launch-and-builder-tags.md.
-DEFAULT_BUILDER = "ghcr.io/octopilot/builder-jammy-base:rust-builder-c3c756a"
+DEFAULT_BUILDER = "ghcr.io/octopilot/builder-jammy-base:rust-builder-d741287"
 
 
 def get_file_content(context_path: str, filename: str) -> str | None:

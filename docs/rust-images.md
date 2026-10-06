@@ -18,7 +18,7 @@ One crate, one image. `Cargo.toml` at the context root (or under
 - image: ghcr.io/octopilot/igniteflux
   context: .
   buildpacks:
-    builder: ghcr.io/octopilot/builder-jammy-base:rust-builder-c3c756a
+    builder: ghcr.io/octopilot/builder-jammy-base:rust-builder-d741287
     runImage: ghcr.io/octopilot/igniteflux-base:latest
     env:
       - BP_TEST_COMMAND=./hack/test-unit.sh
@@ -90,30 +90,15 @@ which process is the default.
 
 ## What the published buildpack does today
 
-The builder pin `rust-builder-c3c756a` contains `octopilot/rust` **0.1.14**
-(lifecycle 0.21.22). That release does not implement the selection table
-above yet. It is the same launch behavior as 0.1.13, plus cache sweeping.
+Builder `rust-builder-d741287` (and `:latest`) contains `octopilot/rust`
+**0.1.15**. That is the selection table above: only `kind = bin` becomes a
+process, `default-run` or the package name chooses `web`, and
+`BP_RUST_BINARY_NAME` is an override. A prune that drops `bin/<name>` fails
+the build.
 
-On those versions:
-
-- Any Cargo artifact with an executable path is copied into `/workspace/bin`,
-  including build scripts. The first one Cargo prints becomes `web`.
-- `BP_RUST_BINARY_NAME` is read only when that scan finds nothing. A
-  successful `cargo build` ignores it. Setting it in `skaffold.yaml` does
-  not select the process.
-- A crate with no `build.rs` and one bin still lands on the right file,
-  because that bin is the only executable. igniteflux is in this set, which
-  is why the variable can be deleted there today.
-- A crate with `build.rs`, or a workspace image with several bins, can boot
-  the wrong process. Do not paper over that with `BP_RUST_BINARY_NAME` until
-  the buildpack honors it on a successful build.
-
-`octopilot/rust` 0.1.15 applies that table: only `kind = bin` becomes a
-process, `default-run` and the package name choose `web`, and
-`BP_RUST_BINARY_NAME` is an override that is honored on a successful build.
-A failed prune that drops `bin/<name>` fails the build. 0.1.15 is not in
-builder `rust-builder-c3c756a`. Until a builder is published with it, prefer
-one bin per image and no `build.rs` in the crate you are packaging.
+0.1.14 and earlier, including `rust-builder-c3c756a`, copied every Cargo
+executable (including build scripts) and ignored `BP_RUST_BINARY_NAME` when
+the build succeeded. Do not pin those tags.
 
 ## Builder
 
@@ -123,11 +108,11 @@ Pack artifacts use the Octopilot builder, not
 this layout.
 
 ```yaml
-builder: ghcr.io/octopilot/builder-jammy-base:rust-builder-c3c756a
+builder: ghcr.io/octopilot/builder-jammy-base:rust-builder-d741287
 ```
 
-That tag is the image behind `:latest` (`octopilot/rust` 0.1.14, lifecycle
-0.21.22, config `sha256:b8db544fac01`). Pin the immutable tag. `:latest` moves when the builder is
+That tag is the image behind `:latest` (`octopilot/rust` 0.1.15, lifecycle
+0.21.22, config `sha256:7f089cb1687a`). Pin the immutable tag. `:latest` moves when the builder is
 published. `rust-builder-d5eb42a` is rust 0.1.6: the binary is at
 `/workspace/bin/<name>` and the image has no launch processes, so the
 container exits with no default process.

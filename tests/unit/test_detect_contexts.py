@@ -485,4 +485,4 @@ build:
         images = [e for e in ctx["integration_matrix"] if e.get("type") == "image"]
         assert len(images) == 1
         assert images[0]["builder"] == detect.DEFAULT_BUILDER
-        assert images[0]["builder"].endswith(":rust-builder-c3c756a")
+        assert images[0]["builder"].endswith(":rust-builder-d741287")
