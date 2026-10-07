@@ -14,7 +14,7 @@ This action automatically whitelists the GitHub Runner's public IP in your AWS E
 ```yaml
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Configure AWS Credentials
         uses: aws-actions/configure-aws-credentials@v4

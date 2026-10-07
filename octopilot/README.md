@@ -88,9 +88,9 @@ on:
 
 jobs:
   build-binaries:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
@@ -100,7 +100,7 @@ jobs:
           version: ${{ github.ref_name }}
           output_dir: dist
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist-binaries
           path: dist/op-*
@@ -108,16 +108,16 @@ jobs:
 
   build-container:
     needs: build-binaries
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     permissions:
       packages: write
       id-token: write
       attestations: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Download op binary
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: dist-binaries
           path: dist/
@@ -144,7 +144,7 @@ jobs:
           op_binary: ./dist/op-linux-amd64
 
       - name: Attest Build Provenance
-        uses: actions/attest-build-provenance@v2
+        uses: actions/attest-build-provenance@v4
         with:
           subject-name: ghcr.io/${{ github.repository_owner }}/op
           subject-digest: ${{ steps.push.outputs.digest }}
@@ -159,7 +159,7 @@ jobs:
   appear first by convention.
 - **SBOM**: When `sbom_output` is non-empty and SBOMs are generated, the action creates
   `<sbom_output>.tar.gz` automatically.
-- **Disk space**: Multi-arch buildpack builds are large. If running on `ubuntu-latest`, consider
+- **Disk space**: Multi-arch buildpack builds are large. If running on `ubuntu-24.04`, consider
   freeing unused toolchains (Android SDK, .NET, etc.) before this action. See
   `octopilot/actions/janitor` or use `just free-disk` from `octopilot-pipeline-tools`.
 

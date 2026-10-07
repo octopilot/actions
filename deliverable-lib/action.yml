@@ -54,7 +54,7 @@ runs:
 
     - name: Cache Cargo and rustup
       if: steps.ctx.outputs.language == 'rust'
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/bin/
@@ -107,7 +107,7 @@ runs:
     # ── Python ────────────────────────────────────────────────────────────────
     - name: Setup Python
       if: steps.ctx.outputs.language == 'python'
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
         # requires-python ranges (e.g. ">=3.10") are not valid inputs; use a
         # floor extracted from the range, else a modern default.

@@ -45,7 +45,7 @@ With `upload: per-binary` the action additionally uploads every collected
 file of `upload-profile` (default `release`) as its **own** run artifact
 named `<upload-prefix><binary>` (default `bin-<binary>`). Plain
 `actions/upload-artifact` is one static step per artifact, so a nested
-JavaScript action (`upload-each/`, `using: node20`, ncc-bundled) drives N
+JavaScript action (`upload-each/`, `using: node24`, ncc-bundled) drives N
 uploads via `@actions/artifact`. It is staged into the caller workspace
 (relative `uses:` is workflow-repo-scoped) so the runner injects
 `ACTIONS_RUNTIME_TOKEN` — a composite `run: node …` toolkit does not, and
@@ -56,7 +56,7 @@ collide. Rebuild the bundle after SDK changes:
 Downstream jobs then pull exactly what they need:
 
 ```yaml
-- uses: actions/download-artifact@v4
+- uses: actions/download-artifact@v8
   with:
     name: bin-hauliage_migrator
     path: bin/

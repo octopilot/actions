@@ -42,12 +42,13 @@ on:
       runner:
         description: >
           Runner for all jobs. Either a single label string (default
-          "ubuntu-latest") or a JSON array string for self-hosted label sets,
+          "ubuntu-24.04"; ubuntu-latest moves to Ubuntu 26.04 starting 19 October 2026)
+          or a JSON array string for self-hosted label sets,
           e.g. '["self-hosted", "linux", "x64", "microscaler"]'. Self-hosted
           runners need docker + passwordless sudo (mold/musl apt installs);
           the low-disk reclaim step auto-skips on machines with real disks.
         type: string
-        default: ubuntu-latest
+        default: ubuntu-24.04
       op_version:
         description: Octopilot `op` builder image version for artifact builds.
         type: string
@@ -119,7 +120,7 @@ jobs:
     outputs:
       pipeline-context: ${{ steps.detect.outputs.pipeline-context }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Detect Contexts
         id: detect
         uses: octopilot/actions/detect-contexts@main
@@ -133,7 +134,7 @@ jobs:
     # Hard cap — a hung test must fail the job, not burn 6h of runner time.
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: octopilot/actions/lint@main
         with:
           pipeline-context: ${{ needs.detect.outputs.pipeline-context }}
@@ -159,7 +160,7 @@ jobs:
       matrix:
         include: ${{ fromJson(needs.detect.outputs.pipeline-context).matrix }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Run tests
         if: matrix.kind != 'deliverable'
@@ -186,7 +187,7 @@ jobs:
 
       - name: Upload binary dist
         if: matrix.kind == 'deliverable' && matrix.type == 'binary'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: deliverable-${{ matrix.output_key }}
           path: ${{ steps.binary.outputs.dist-path }}
@@ -202,7 +203,7 @@ jobs:
     outputs:
       uuid: ${{ steps.validate.outputs.uuid }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Validate primary build and generate UUID
         id: validate
         uses: octopilot/actions/integration-validate@main
@@ -230,7 +231,7 @@ jobs:
       matrix:
         include: ${{ fromJson(needs.detect.outputs.pipeline-context).integration_matrix_wave0 }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Pack build-cache as a GHCR image: push + workflow_dispatch only — fork
       # PRs have no write token, and the cache needs a STABLE name across runs
@@ -292,7 +293,7 @@ jobs:
           mkdir -p artifact-out
           [ -f build_result.json ] && cp build_result.json artifact-out/ || true
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: integration-${{ matrix.output_key }}
           path: artifact-out
@@ -351,10 +352,10 @@ jobs:
     env:
       SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Download artifact outputs
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: integration-*
           path: artifact-outputs
@@ -554,13 +555,13 @@ jobs:
     env:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0   # previous-tag + release notes need full tag history
 
       - name: Download integration artifact outputs
         if: needs.integration-artifacts.result == 'success' && (needs.integration-artifacts-wave1.result == 'success' || needs.integration-artifacts-wave1.result == 'skipped')
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: integration-*
           path: artifact-outputs
@@ -641,7 +642,7 @@ jobs:
 
       - name: Upload release build result
         if: needs.integration-artifacts.result == 'success' && (needs.integration-artifacts-wave1.result == 'success' || needs.integration-artifacts-wave1.result == 'skipped')
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: release-build-result
           path: release_result.json
@@ -650,7 +651,7 @@ jobs:
       # Binary deliverable dists (uploaded by the test job's deliverable legs)
       # attach to the GitHub Release. Zero matches is fine — image-only repos.
       - name: Download binary deliverable dists
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: deliverable-*
           path: dist

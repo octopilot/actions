@@ -78,7 +78,7 @@ runs:
     # Stage the nested JS action into the caller workspace. Relative `uses:`
     # paths resolve against the workflow repo (not github.action_path), and a
     # composite `run: node` toolkit does not get ACTIONS_RUNTIME_TOKEN on
-    # self-hosted — `using: node20` does.
+    # self-hosted — `using: node24` does.
     - name: Stage per-binary upload action
       if: inputs.upload == 'per-binary'
       shell: bash

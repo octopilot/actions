@@ -27,7 +27,7 @@ that pushes or pulls images:
 ```yaml
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       registry:
         image: ghcr.io/octopilot/registry-tls:latest
@@ -35,7 +35,7 @@ jobs:
           - 5001:5000
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Verify registry
         uses: octopilot/actions/verify-registry@main

@@ -22,7 +22,7 @@ This GitHub Action decrypts a SOPS-encrypted file using GPG or AGE keys.
 
 ```yaml
 steps:
-  - uses: actions/checkout@v4
+  - uses: actions/checkout@v7
   
   - name: Decrypt secrets
     id: secrets

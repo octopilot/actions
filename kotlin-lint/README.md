@@ -32,9 +32,9 @@ permissions:
 
 jobs:
   ktlint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Option A — reference this action from the octopilot/actions repo (tag or branch)
       - uses: octopilot/actions/kotlin-lint@main

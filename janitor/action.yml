@@ -1,6 +1,6 @@
 name: 'Janitor'
 description: >
-  Frees disk space on GitHub-hosted ubuntu-latest runners by removing
+  Frees disk space on GitHub-hosted ubuntu-24.04 runners by removing
   toolchains and SDKs that are not needed in the current job.
 
   Every removable path is mapped to one or more languages. A path is only

@@ -113,7 +113,7 @@ on:
       runner:
         description: Runner label string or JSON array string (same convention as the pipeline).
         type: string
-        default: ubuntu-latest
+        default: ubuntu-24.04
 
 jobs:
   acceptance:
@@ -126,7 +126,7 @@ jobs:
       contents: read    # release asset download + acceptance test sources
       packages: read    # pull from GHCR (first hop)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           ref: ${{ inputs.version }}
 

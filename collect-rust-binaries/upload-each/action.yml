@@ -2,7 +2,7 @@ name: "Upload each file as artifact"
 description: >
   Upload every direct child file in a directory as its own GitHub Actions
   artifact. Runs as a JavaScript action so ACTIONS_RUNTIME_TOKEN is injected
-  (unlike shelling out to node from a composite run step).
+  (unlike shelling out to node from a composite run step). Declares node24, which is the runner runtime.
 inputs:
   directory:
     description: Directory whose direct children are uploaded (one artifact each).
@@ -16,5 +16,5 @@ inputs:
     required: false
     default: "7"
 runs:
-  using: node20
+  using: node24
   main: dist/index.js

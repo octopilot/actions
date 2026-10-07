@@ -114,7 +114,7 @@ permissions:
 
 jobs:
   scale:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: octopilot/actions/scale-min-replicas@main
         with:

@@ -60,7 +60,7 @@ When neither `template_path` nor `template` is set, this template is used. You c
 
 ```yaml
 - name: Checkout
-  uses: actions/checkout@v4
+  uses: actions/checkout@v7
   with:
     fetch-depth: 0
 

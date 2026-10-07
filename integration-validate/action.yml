@@ -85,7 +85,7 @@ runs:
 
     - name: Cache Cargo and rustup
       if: steps.resolve.outputs.language == 'rust'
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/bin/
@@ -131,7 +131,7 @@ runs:
 
     - name: Setup Go
       if: steps.resolve.outputs.language == 'go'
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v7
       with:
         go-version: ${{ steps.resolve.outputs.version || '1.24' }}
 

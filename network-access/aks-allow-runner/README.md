@@ -14,7 +14,7 @@ This action automatically whitelists the GitHub Runner's public IP in your Azure
 ```yaml
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - name: Azure Login
         uses: azure/login@v1

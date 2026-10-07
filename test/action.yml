@@ -36,7 +36,7 @@ runs:
         echo "name_slug=${SLUG:-unknown}" >> "$GITHUB_OUTPUT"
 
     # ── Disk headroom (GitHub-hosted runners only, threshold-gated) ──────────
-    # ubuntu-latest ships ~14 GB free; a large Rust workspace's target/ blows
+    # ubuntu-24.04 ships ~14 GB free; a large Rust workspace's target/ blows
     # past that (ENOSPC mid-link). Pruning preinstalled toolchains we never
     # use (dotnet, Android, GHC, CodeQL, boost) reclaims ~25-30 GB. Gated on
     # free space < 25 GB so self-hosted runners with real disks skip it
@@ -91,7 +91,7 @@ runs:
 
     - name: Setup Go
       if: steps.ctx.outputs.language == 'go'
-      uses: actions/setup-go@v5
+      uses: actions/setup-go@v7
       with:
         go-version: ${{ steps.ctx.outputs.version || '1.24' }}
 
@@ -104,7 +104,7 @@ runs:
     # Cache Cargo registry + rustup + extracted binaries (not target/).
     - name: Cache Cargo and rustup
       if: steps.ctx.outputs.language == 'rust'
-      uses: actions/cache@v4
+      uses: actions/cache@v6
       with:
         path: |
           ~/.cargo/bin/
@@ -120,19 +120,19 @@ runs:
 
     - name: Setup Python
       if: steps.ctx.outputs.language == 'python'
-      uses: actions/setup-python@v5
+      uses: actions/setup-python@v7
       with:
         python-version: ${{ steps.ctx.outputs.version || '3.12' }}
 
     - name: Setup Node
       if: steps.ctx.outputs.language == 'node'
-      uses: actions/setup-node@v4
+      uses: actions/setup-node@v7
       with:
         node-version: ${{ steps.ctx.outputs.version || '20' }}
 
     - name: Setup Java
       if: steps.ctx.outputs.language == 'java'
-      uses: actions/setup-java@v4
+      uses: actions/setup-java@v6
       with:
         distribution: temurin
         java-version: ${{ steps.ctx.outputs.version || '17' }}
@@ -362,7 +362,7 @@ runs:
     # ── Upload coverage report (when produced) ─────────────────────────────────
     - name: Upload coverage report
       if: success() && (steps.ctx.outputs.language == 'rust' || steps.ctx.outputs.language == 'go' || steps.ctx.outputs.language == 'python' || steps.ctx.outputs.language == 'node' || steps.ctx.outputs.language == 'java')
-      uses: actions/upload-artifact@v4
+      uses: actions/upload-artifact@v7
       with:
         name: coverage-${{ steps.ctx.outputs.name_slug }}
         path: coverage

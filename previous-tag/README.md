@@ -6,7 +6,7 @@ Useful for generating changelogs or release notes.
 ## Usage
 
 ```yaml
-- uses: actions/checkout@v4
+- uses: actions/checkout@v7
   with:
     fetch-depth: 0 # Required for git describe
 

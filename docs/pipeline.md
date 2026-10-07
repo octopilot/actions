@@ -63,7 +63,7 @@ The result: a contributor can fork, push, and exercise the entire pipeline
 | --- | --- | --- |
 | `integration` | `false` | Run the generic Kind + Flux deploy. Requires the integration bits below. |
 | `namespace` | repo name | Target namespace for the deploy. |
-| `runner` | `ubuntu-latest` | Runner label for all jobs. |
+| `runner` | `ubuntu-24.04` | Runner label for all jobs. Pinned so `ubuntu-latest` moving to Ubuntu 26.04 on 19 October 2026 does not change the image. |
 | `op_version` | `v1.2.0` | `ghcr.io/octopilot/op` tag. Pin the release. `latest` and `main` are not this release. |
 | `actions_ref` | `main` | Ref the composite steps resolve to (pin alongside the workflow for reproducibility). |
 

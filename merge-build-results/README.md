@@ -29,7 +29,7 @@ When the workflow fans out (e.g. matrix) and each job runs an Octopilot build (o
 ## Example (workflow)
 
 ```yaml
-- uses: actions/download-artifact@v4
+- uses: actions/download-artifact@v8
   with:
     pattern: integration-*
     path: artifact-outputs

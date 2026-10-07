@@ -84,7 +84,7 @@ runs:
   using: 'composite'
   steps:
     - name: Checkout target branch
-      uses: actions/checkout@v4
+      uses: actions/checkout@v7
       with:
         ref: ${{ inputs.branch }}
         token: ${{ inputs.token }}

@@ -2,7 +2,7 @@
 // downstream job can download exactly the binary it needs
 // (actions/download-artifact with name: <prefix><binary>).
 //
-// Must run as `using: node20` (see action.yml) so the runner injects
+// Must run as `using: node24` (see action.yml) so the runner injects
 // ACTIONS_RUNTIME_TOKEN — a composite `run: node …` step does not reliably
 // receive that env on self-hosted runners.
 
