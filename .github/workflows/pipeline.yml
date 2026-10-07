@@ -314,7 +314,7 @@ jobs:
     permissions:
       contents: read
       packages: write
-    uses: octopilot/actions/.github/workflows/integration-artifacts-wave.yml@${{ inputs.actions_ref }}
+    uses: octopilot/actions/.github/workflows/integration-artifacts-wave.yml@main
     with:
       runner: ${{ inputs.runner }}
       op_version: ${{ inputs.op_version }}
