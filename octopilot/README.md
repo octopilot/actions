@@ -18,7 +18,7 @@ attestation) can consume.
 | `ttl-tag` | No | `1h` | Tag for ttl.sh when `ttl-uuid` is set. |
 | `version` | No | `$GITHUB_REF_NAME` | Version tag applied to pushed images (e.g. `v1.2.3`). |
 | `platforms` | No | `linux/amd64` | Comma-separated platform list, e.g. `linux/amd64,linux/arm64`. |
-| `op_version` | No | `v1.1.2` | Tag of `ghcr.io/octopilot/op` used when `build_bypass` is false. `latest`, `main`, and `v1.1.2` are different images. |
+| `op_version` | No | `v1.2.0` | Tag of `ghcr.io/octopilot/op` used when `build_bypass` is false. Pin the release. `latest` and `main` are not this release. |
 | `sbom_output` | No | `dist/sbom` | Directory where SBOMs are written. Packaged as `<sbom_output>.tar.gz` when non-empty. |
 | `op_binary` | No | `op` | Path to a pre-built `op` binary. Only used when `build_bypass` is `true`. |
 | `build_bypass` | No | `false` | Run `op` directly instead of inside a container. Used for bootstrapping or when a pre-built binary is already available (e.g. from a prior `build-binaries` job). |
