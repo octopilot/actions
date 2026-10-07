@@ -1,0 +1,119 @@
+name: Integration dependents
+
+# Wave 1 of the Octopilot integration matrix. Called from pipeline.yml only
+# when an image's runImage or requires names an artifact built in wave 0.
+# Keeping the matrix in this file means a run with nothing in wave 1 never
+# materialises a job whose name is an unexpanded ${{ matrix.* }} expression.
+on:
+  workflow_call:
+    inputs:
+      runner:
+        description: Runner label, or a JSON array string of labels. Same contract as pipeline.yml.
+        type: string
+        required: true
+      op_version:
+        description: Tag of ghcr.io/octopilot/op.
+        type: string
+        required: true
+      ttl_uuid:
+        description: ttl.sh UUID from integration-validate.
+        type: string
+        required: true
+      integration_max_parallel:
+        description: Cap on concurrent legs. 0 means unlimited.
+        type: number
+        required: true
+      matrix:
+        description: JSON array of wave-1 integration matrix entries.
+        type: string
+        required: true
+
+jobs:
+  build:
+    name: Integration (${{ matrix.suffix || matrix.output_key }})
+    runs-on: ${{ (startsWith(inputs.runner, '[') && fromJSON(inputs.runner)) || inputs.runner }}
+    permissions:
+      contents: read
+      packages: write
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      max-parallel: ${{ inputs.integration_max_parallel > 0 && inputs.integration_max_parallel || 999 }}
+      matrix:
+        include: ${{ fromJson(inputs.matrix) }}
+    steps:
+      - uses: actions/checkout@v4
+
+      # Pack build-cache as a GHCR image: push + workflow_dispatch only — fork
+      # PRs have no write token, and the cache needs a STABLE name across runs
+      # (ttl.sh's per-run UUIDs are useless for caching). Old op versions
+      # ignore the cache image harmlessly; op v1.0.18+ restores/exports it.
+      - name: Login to GHCR for build cache
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && matrix.type == 'image'
+        shell: bash
+        run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Derive build-cache image name
+        id: cache
+        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && matrix.type == 'image'
+        shell: bash
+        env:
+          MATRIX_IMAGE: ${{ matrix.image }}
+        run: |
+          base="$(basename "${MATRIX_IMAGE%%:*}")"
+          img="ghcr.io/${GITHUB_REPOSITORY_OWNER}/${base}-buildcache"
+          # GHCR chicken-and-egg: the lifecycle RESTORES (pulls) the cache
+          # image before it ever exports one, and GITHUB_TOKEN gets DENIED
+          # (not 404) pulling a package that has never existed — fatal to the
+          # build. Bootstrap: push a tiny placeholder so the package exists
+          # with the repo association; the lifecycle treats a metadata-less
+          # cache image as empty and overwrites it on first export.
+          # docker import needs a REAL tar stream (raw text -> "unexpected
+          # EOF"), and the whole bootstrap is best-effort: any failure
+          # degrades to a cacheless build instead of failing the job.
+          if ! docker manifest inspect "$img:latest" >/dev/null 2>&1; then
+            echo "Bootstrapping build-cache package (first run): $img"
+            stage="$(mktemp -d)"
+            echo 'octopilot buildcache bootstrap' > "$stage/.octopilot-buildcache-bootstrap"
+            if ! { tar -C "$stage" -cf - . | docker import - "$img:latest" >/dev/null \
+                   && docker push "$img:latest" >/dev/null 2>&1; }; then
+              echo "::warning::build-cache bootstrap failed for $img — building without cache this run"
+              echo "image=" >> "$GITHUB_OUTPUT"
+              rm -rf "$stage"
+              exit 0
+            fi
+            rm -rf "$stage"
+          fi
+          echo "image=$img" >> "$GITHUB_OUTPUT"
+
+      - name: Wave 0 build results
+        uses: actions/download-artifact@v4
+        with:
+          pattern: integration-*
+          path: wave0-outputs
+      - name: Merge wave 0 build results
+        uses: octopilot/actions/merge-build-results@main
+        with:
+          directory: wave0-outputs
+          output-path: wave0-build_result.json
+      - name: Build and push artifact
+        id: build
+        uses: octopilot/actions/integration-build-artifact@main
+        with:
+          artifact: ${{ toJson(matrix) }}
+          ttl-uuid: ${{ inputs.ttl_uuid }}
+          op_version: ${{ inputs.op_version }}
+          cache_image: ${{ steps.cache.outputs.image || '' }}
+          from_build_result: wave0-build_result.json
+
+      # ONE contract per leg: build_result.json (imageName + digested tag).
+      - name: Upload artifact outputs
+        run: |
+          mkdir -p artifact-out
+          [ -f build_result.json ] && cp build_result.json artifact-out/ || true
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: integration-${{ matrix.output_key }}
+          path: artifact-out
+          retention-days: 1

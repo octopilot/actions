@@ -64,6 +64,32 @@ runs:
         # octopilot-pipeline-tools/docs/image-launch-and-builder-tags.md.
         echo "builder=$(echo "$ARTIFACT" | jq -r '.builder // "ghcr.io/octopilot/builder-jammy-base:rust-builder-d741287"')" >> "$GITHUB_OUTPUT"
         echo "build_env=$(echo "$ARTIFACT" | jq -r '.build_env // ""')" >> "$GITHUB_OUTPUT"
+        echo "run_image=$(echo "$ARTIFACT" | jq -r '.run_image // ""')" >> "$GITHUB_OUTPUT"
+
+    - name: Resolve run image from the earlier wave
+      id: runimage
+      if: inputs.from_build_result != '' && steps.parse.outputs.run_image != ''
+      shell: bash
+      env:
+        FROM_BUILD_RESULT: ${{ inputs.from_build_result }}
+        RUN_IMAGE: ${{ steps.parse.outputs.run_image }}
+      run: |
+        # op looks up runImage by the exact skaffold string. A published tag
+        # (`ghcr.io/org/app-base:latest`) does not equal the artifact name
+        # (`app-base`) stored in build_result.json, so hand op that pair.
+        base="${RUN_IMAGE##*/}"
+        base="${base%%@*}"
+        base="${base%%:*}"
+        tag="$(jq -r --arg b "$base" '
+          .builds[]
+          | select((.imageName | split("/")[-1] | split("@")[0] | split(":")[0]) == $b)
+          | .tag
+        ' "$FROM_BUILD_RESULT" | head -n 1)"
+        if [ -z "$tag" ] || [ "$tag" = "null" ]; then
+          echo "::warning::no built image named ${base} in ${FROM_BUILD_RESULT}; op will use ${RUN_IMAGE} as written"
+          exit 0
+        fi
+        echo "override=${RUN_IMAGE}=${tag}" >> "$GITHUB_OUTPUT"
 
     - name: Build and push image (Octopilot)
       id: build
@@ -77,6 +103,8 @@ runs:
         op_version: ${{ inputs.op_version }}
         docker_host: ${{ inputs.docker_host }}
         cache_image: ${{ inputs.cache_image }}
+        from_build_result: ${{ inputs.from_build_result }}
+        run_image_override: ${{ steps.runimage.outputs.override }}
 
     - name: Build and push chart (Octopilot)
       id: chart_build

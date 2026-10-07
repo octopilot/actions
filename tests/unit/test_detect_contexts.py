@@ -486,3 +486,53 @@ build:
         assert len(images) == 1
         assert images[0]["builder"] == detect.DEFAULT_BUILDER
         assert images[0]["builder"].endswith(":rust-builder-d741287")
+
+    def test_registry_run_image_depends_on_short_artifact_name(self, tmp_path, capsys):
+        # igniteflux names the base artifact `igniteflux-base` and points the app
+        # runImage at the published tag of that same image. Those are one artifact.
+        # The app belongs in wave 1. An unrelated run image stays in wave 0.
+        (tmp_path / "skaffold.yaml").write_text("""apiVersion: skaffold/v4beta7
+kind: Config
+build:
+  artifacts:
+    - image: igniteflux-base
+      context: base
+    - image: ghcr.io/octopilot/igniteflux-chart
+      context: chart
+      buildpacks:
+        builder: ghcr.io/octopilot/builder-jammy-base:test
+    - image: ghcr.io/octopilot/igniteflux
+      context: .
+      buildpacks:
+        builder: ghcr.io/octopilot/builder-jammy-base:test
+        runImage: ghcr.io/octopilot/igniteflux-base:latest
+    - image: ghcr.io/octopilot/other
+      context: other
+      buildpacks:
+        builder: ghcr.io/octopilot/builder-jammy-base:test
+        runImage: gcr.io/buildpacks/gcp/run:v1
+""")
+        (tmp_path / "base").mkdir()
+        (tmp_path / "base" / "Dockerfile").write_text("FROM scratch\n")
+        (tmp_path / "chart").mkdir()
+        (tmp_path / "chart" / "Chart.yaml").write_text("name: igniteflux\nversion: 0.1.0\n")
+        (tmp_path / "Cargo.toml").write_text('[package]\nname = "igniteflux"\nversion = "0.1.0"\n')
+        (tmp_path / "other").mkdir()
+        (tmp_path / "other" / "Cargo.toml").write_text('[package]\nname = "other"\nversion = "0.1.0"\n')
+
+        with patch.dict(os.environ, {"SKAFFOLD_FILE": str(tmp_path / "skaffold.yaml")}, clear=False):
+            detect.main()
+
+        captured = capsys.readouterr()
+        ctx = json.loads(captured.out.split("pipeline-context=")[1].split("\n")[0])
+        by_suffix = {e["suffix"]: e for e in ctx["integration_matrix"] if e.get("type") == "image"}
+        assert by_suffix["base"]["wave"] == 0
+        assert by_suffix["chart"]["wave"] == 0
+        assert by_suffix["other"]["wave"] == 0
+        assert "run_image" not in by_suffix["other"]
+        app = by_suffix["igniteflux"]
+        assert app["wave"] == 1
+        assert app["depends_on"] == ["image_base"]
+        assert app["run_image"] == "ghcr.io/octopilot/igniteflux-base:latest"
+        assert [e["suffix"] for e in ctx["integration_matrix_wave1"]] == ["igniteflux"]
+        assert "igniteflux" not in {e["suffix"] for e in ctx["integration_matrix_wave0"]}

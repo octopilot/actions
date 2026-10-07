@@ -57,6 +57,14 @@ inputs:
       that registry and op v1.1.2+ (cache-image registry auth; older op fails UNAUTHORIZED).
     required: false
     default: ''
+  from_build_result:
+    description: 'Path to a build_result.json from an earlier wave. Passed to op --from-build-result.'
+    required: false
+    default: ''
+  run_image_override:
+    description: 'name=ref passed to op --run-image-override. name is the skaffold runImage string; ref is the image this run built.'
+    required: false
+    default: ''
 outputs:
   digest:
     description: 'Container image digest (e.g. sha256:...).'
@@ -84,6 +92,8 @@ runs:
         INPUT_BUILD_BYPASS: ${{ inputs.build_bypass }}
         INPUT_DOCKER_HOST: ${{ inputs.docker_host }}
         INPUT_CACHE_IMAGE: ${{ inputs.cache_image }}
+        INPUT_FROM_BUILD_RESULT: ${{ inputs.from_build_result }}
+        INPUT_RUN_IMAGE_OVERRIDE: ${{ inputs.run_image_override }}
       run: |
         # Determine version
         VERSION="${INPUT_VERSION}"
@@ -126,12 +136,15 @@ runs:
             OP_ARTIFACT=""
             if [ -n "${INPUT_ARTIFACT}" ]; then OP_ARTIFACT="--artifact ${INPUT_ARTIFACT}"; fi
             if [ -n "${INPUT_ARTIFACT_KEY}" ]; then OP_ARTIFACT="${OP_ARTIFACT} --artifact-key ${INPUT_ARTIFACT_KEY}"; fi
+            OP_PRIOR=()
+            if [ -n "${INPUT_FROM_BUILD_RESULT}" ]; then OP_PRIOR+=(--from-build-result "${INPUT_FROM_BUILD_RESULT}"); fi
+            if [ -n "${INPUT_RUN_IMAGE_OVERRIDE}" ]; then OP_PRIOR+=(--run-image-override "${INPUT_RUN_IMAGE_OVERRIDE}"); fi
             if [ -n "${INPUT_TTL_UUID}" ]; then
-              "${INPUT_OP_BINARY}" build --ttl-uuid "${INPUT_TTL_UUID}" --ttl-tag "${INPUT_TTL_TAG:-1h}" $OP_ARTIFACT --platform "${INPUT_PLATFORMS}" --push --sbom-output "${INPUT_SBOM_OUTPUT}"
+              "${INPUT_OP_BINARY}" build --ttl-uuid "${INPUT_TTL_UUID}" --ttl-tag "${INPUT_TTL_TAG:-1h}" $OP_ARTIFACT "${OP_PRIOR[@]}" --platform "${INPUT_PLATFORMS}" --push --sbom-output "${INPUT_SBOM_OUTPUT}"
             elif [ -n "${INPUT_ARTIFACT}" ] && [ "${INPUT_ARTIFACT#$INPUT_REGISTRY}" != "${INPUT_ARTIFACT}" ]; then
-              "${INPUT_OP_BINARY}" build $OP_ARTIFACT --platform "${INPUT_PLATFORMS}" --push --sbom-output "${INPUT_SBOM_OUTPUT}"
+              "${INPUT_OP_BINARY}" build $OP_ARTIFACT "${OP_PRIOR[@]}" --platform "${INPUT_PLATFORMS}" --push --sbom-output "${INPUT_SBOM_OUTPUT}"
             else
-              "${INPUT_OP_BINARY}" build --repo "${INPUT_REGISTRY}" $OP_ARTIFACT --platform "${INPUT_PLATFORMS}" --push --sbom-output "${INPUT_SBOM_OUTPUT}"
+              "${INPUT_OP_BINARY}" build --repo "${INPUT_REGISTRY}" $OP_ARTIFACT "${OP_PRIOR[@]}" --platform "${INPUT_PLATFORMS}" --push --sbom-output "${INPUT_SBOM_OUTPUT}"
             fi
         else
             # Determine builder image tag
@@ -204,6 +217,8 @@ runs:
                 -e OP_PLATFORMS="${INPUT_PLATFORMS}" \
                 -e OP_SBOM_OUTPUT="${INPUT_SBOM_OUTPUT}" \
                 -e OP_CACHE_IMAGE="${INPUT_CACHE_IMAGE}" \
+                -e OP_FROM_BUILD_RESULT="${INPUT_FROM_BUILD_RESULT}" \
+                -e OP_RUN_IMAGE_OVERRIDE="${INPUT_RUN_IMAGE_OVERRIDE}" \
                 -e DOCKER_CONFIG_CONTENT="$DOCKER_CONFIG_CONTENT" \
                 --entrypoint /bin/sh \
                 "$IMAGE" \
@@ -229,6 +244,8 @@ runs:
                   fi && \
                   OP_ARTIFACT_ARG=""; if [ -n "$OP_ARTIFACT" ]; then OP_ARTIFACT_ARG="--artifact $OP_ARTIFACT"; fi; \
                   if [ -n "$OP_ARTIFACT_KEY" ]; then OP_ARTIFACT_ARG="$OP_ARTIFACT_ARG --artifact-key $OP_ARTIFACT_KEY"; fi && \
+                  if [ -n "$OP_FROM_BUILD_RESULT" ]; then OP_EXTRA="$OP_EXTRA --from-build-result $OP_FROM_BUILD_RESULT"; fi && \
+                  if [ -n "$OP_RUN_IMAGE_OVERRIDE" ]; then OP_EXTRA="$OP_EXTRA --run-image-override $OP_RUN_IMAGE_OVERRIDE"; fi && \
                   op build $OP_REPO_ARG $OP_EXTRA $OP_ARTIFACT_ARG --platform "$OP_PLATFORMS" --push --sbom-output "$OP_SBOM_OUTPUT"'
         fi
 

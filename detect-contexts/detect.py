@@ -504,6 +504,28 @@ def _image_key(image: str) -> str:
     return ref
 
 
+def _image_basename(image: str) -> str:
+    return _image_key(image).rsplit("/", 1)[-1]
+
+
+def _match_built_artifact(image: str, by_image: dict[str, dict], self_key: str) -> dict | None:
+    """Match a runImage or requires ref to another artifact in this build.
+
+    An exact ref (tag stripped) wins. A published tag also matches the artifact
+    whose image name is that same last path segment, so `igniteflux-base` and
+    `ghcr.io/octopilot/igniteflux-base:latest` are one image. Two artifacts with
+    the same basename are left unmatched rather than guessed.
+    """
+    exact = _image_key(image)
+    if exact in by_image and exact != self_key:
+        return by_image[exact]
+    base = _image_basename(image)
+    hits = [entry for key, entry in by_image.items() if key != self_key and _image_basename(key) == base]
+    if len(hits) == 1:
+        return hits[0]
+    return None
+
+
 def assign_waves(integration_matrix: list[dict], artifacts: list[dict]) -> None:
     """Dependencies from skaffold declarations: `requires` and a buildpack `runImage` naming another artifact.
 
@@ -521,13 +543,17 @@ def assign_waves(integration_matrix: list[dict], artifacts: list[dict]) -> None:
         deps: list[str] = []
         bp = a.get("buildpacks") or {}
         run = bp.get("runImage")
-        if run and _image_key(run) in by_image and _image_key(run) != _image_key(e["image"]):
-            deps.append(by_image[_image_key(run)]["output_key"])
-            e["run_image_from"] = by_image[_image_key(run)]["output_key"]
+        self_key = _image_key(e["image"])
+        matched_run = _match_built_artifact(run, by_image, self_key) if run else None
+        if matched_run:
+            deps.append(matched_run["output_key"])
+            e["run_image_from"] = matched_run["output_key"]
+            e["run_image"] = run
         for r in a.get("requires") or []:
             img = r.get("image") if isinstance(r, dict) else r
-            if img and _image_key(img) in by_image and _image_key(img) != _image_key(e["image"]):
-                deps.append(by_image[_image_key(img)]["output_key"])
+            matched = _match_built_artifact(img, by_image, self_key) if img else None
+            if matched:
+                deps.append(matched["output_key"])
         e["depends_on"] = sorted(set(deps))
     keys = {e["output_key"]: e for e in integration_matrix if e.get("type") == "image"}
 
@@ -745,7 +771,9 @@ def build_pipeline_context(config: dict, repo_root: str) -> dict:
         "workdirs": workdirs,
         "integration_matrix": integration_matrix,
         # Waves: chart entries and images with no dependencies build first; images whose runImage/requires names another
-        # artifact build second, with wave 0's build results. Empty wave 1 = the second job is skipped.
+        # artifact build second, with wave 0's build results. Empty wave 1 skips the
+        # dependents job; that job's name must not mention matrix (GitHub leaves
+        # the expression literal on a skipped job).
         "integration_matrix_wave0": [e for e in integration_matrix if e.get("wave", 0) == 0],
         "integration_matrix_wave1": [e for e in integration_matrix if e.get("wave", 0) == 1],
         "deliverables_matrix": deliverables_matrix,
