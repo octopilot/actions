@@ -604,8 +604,20 @@ def build_integration_matrix(artifacts: list[dict], chart_paths: list[str], repo
         used_suffixes.add(suffix)
         output_key = f"image_{suffix}"
         context_abs = os.path.normpath(os.path.join(repo_root, context))
-        has_dockerfile = os.path.isfile(os.path.join(context_abs, "Dockerfile"))
-        build_method = "docker" if has_dockerfile else "pack"
+        docker_decl = artifact.get("docker") or {}
+        dockerfile_rel = ""
+        if isinstance(docker_decl, dict):
+            dockerfile_rel = str(docker_decl.get("dockerfile") or "")
+        # An explicit dockerfile path is a docker build even when the context
+        # root has no file named Dockerfile (PriceWhisperer keeps Dockerfiles
+        # under docker/ and the context at the repo root).
+        if dockerfile_rel:
+            build_method = "docker"
+        elif os.path.isfile(os.path.join(context_abs, "Dockerfile")):
+            build_method = "docker"
+            dockerfile_rel = "Dockerfile"
+        else:
+            build_method = "pack"
         entry: dict = {
             "type": "image",
             "image": image,
@@ -616,7 +628,10 @@ def build_integration_matrix(artifacts: list[dict], chart_paths: list[str], repo
             "output_key": output_key,
         }
         if build_method == "docker":
-            entry["dockerfile"] = "Dockerfile"
+            entry["dockerfile"] = dockerfile_rel or "Dockerfile"
+            build_args = docker_decl.get("buildArgs") if isinstance(docker_decl, dict) else None
+            if isinstance(build_args, dict) and build_args:
+                entry["build_args"] = {str(k): str(v) for k, v in build_args.items()}
         if build_method == "pack":
             buildpacks = artifact.get("buildpacks") or {}
             entry["builder"] = buildpacks.get("builder", DEFAULT_BUILDER)

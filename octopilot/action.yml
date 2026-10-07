@@ -219,6 +219,7 @@ runs:
                 -e OP_CACHE_IMAGE="${INPUT_CACHE_IMAGE}" \
                 -e OP_FROM_BUILD_RESULT="${INPUT_FROM_BUILD_RESULT}" \
                 -e OP_RUN_IMAGE_OVERRIDE="${INPUT_RUN_IMAGE_OVERRIDE}" \
+                -e GITHUB_TOKEN="${GITHUB_TOKEN}" \
                 -e DOCKER_CONFIG_CONTENT="$DOCKER_CONFIG_CONTENT" \
                 --entrypoint /bin/sh \
                 "$IMAGE" \

@@ -536,3 +536,33 @@ build:
         assert app["run_image"] == "ghcr.io/octopilot/igniteflux-base:latest"
         assert [e["suffix"] for e in ctx["integration_matrix_wave1"]] == ["igniteflux"]
         assert "igniteflux" not in {e["suffix"] for e in ctx["integration_matrix_wave0"]}
+
+    def test_explicit_dockerfile_path_is_a_docker_build(self, tmp_path, capsys):
+        # Context is the repo root, which has no file named Dockerfile. The
+        # Dockerfile lives under docker/ and build args name the crate.
+        (tmp_path / "skaffold.yaml").write_text("""apiVersion: skaffold/v4beta7
+kind: Config
+build:
+  artifacts:
+    - image: ghcr.io/octopilot/pricewhisperer-orders
+      context: .
+      docker:
+        dockerfile: docker/microservices/Dockerfile
+        buildArgs:
+          PACKAGE: pricewhisperer_orders
+          BINARY: orders
+""")
+        (tmp_path / "docker" / "microservices").mkdir(parents=True)
+        (tmp_path / "docker" / "microservices" / "Dockerfile").write_text("FROM scratch\n")
+
+        with patch.dict(os.environ, {"SKAFFOLD_FILE": str(tmp_path / "skaffold.yaml")}, clear=False):
+            detect.main()
+
+        captured = capsys.readouterr()
+        ctx = json.loads(captured.out.split("pipeline-context=")[1].split("\n")[0])
+        images = [e for e in ctx["integration_matrix"] if e.get("type") == "image"]
+        assert len(images) == 1
+        assert images[0]["build_method"] == "docker"
+        assert images[0]["dockerfile"] == "docker/microservices/Dockerfile"
+        assert images[0]["build_args"]["PACKAGE"] == "pricewhisperer_orders"
+        assert "builder" not in images[0]
