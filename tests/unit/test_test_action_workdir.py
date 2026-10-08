@@ -41,3 +41,21 @@ def parse_outputs(tmp_path: Path, item: dict) -> dict:
 )
 def test_runs_in_the_workdir(tmp_path: Path, item: dict, want: str) -> None:
     assert parse_outputs(tmp_path, item)["context"] == want
+
+
+@pytest.mark.parametrize(
+    ("workdir", "want"),
+    [(".", "target"), ("microservices", "../target"), ("a/b", "../../target"), ("svc/", "../target")],
+)
+def test_target_dir_relative_to_the_workdir(tmp_path: Path, workdir: str, want: str) -> None:
+    """rust-cache needs CARGO_TARGET_DIR ($GITHUB_WORKSPACE/target) relative to the workspace root it is given."""
+    assert parse_outputs(tmp_path, {"language": "rust", "workdir": workdir})["target_rel"] == want
+
+
+def test_rust_cache_saves_target_even_on_failure() -> None:
+    steps = yaml.safe_load((ROOT / "test" / "action.yml").read_text())["runs"]["steps"]
+    rc = next(s for s in steps if str(s.get("uses", "")).startswith("Swatinem/rust-cache@"))
+    assert rc["with"]["cache-on-failure"] == "true"
+    assert "steps.ctx.outputs.target_rel" in rc["with"]["workspaces"]
+    names = [s.get("name") for s in steps]
+    assert names.index(rc["name"]) < names.index("Run Tests (Rust) with LLVM coverage")
