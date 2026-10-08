@@ -22,6 +22,10 @@ inputs:
       major release together with the docker/paketo/helm-to-ttl-sh actions.
     required: false
     default: outputs.txt
+  registry:
+    description: 'Private registry for the artifact (from integration-registry); when set, ttl-uuid is not used.'
+    required: false
+    default: ''
   ttl-tag:
     description: 'Tag for ttl.sh when ttl-uuid is set (default 1d).'
     required: false
@@ -110,7 +114,8 @@ runs:
       if: steps.parse.outputs.type == 'image'
       uses: octopilot/actions/octopilot@main
       with:
-        ttl-uuid: ${{ inputs.ttl-uuid }}
+        ttl-uuid: ${{ inputs.registry == '' && inputs.ttl-uuid || '' }}
+        registry: ${{ inputs.registry }}
         ttl-tag: ${{ inputs.ttl-tag }}
         artifact: ${{ steps.parse.outputs.image }}
         artifact_key: ${{ steps.parse.outputs.suffix }}
@@ -125,7 +130,8 @@ runs:
       if: steps.parse.outputs.type == 'chart' && steps.parse.outputs.image != ''
       uses: octopilot/actions/octopilot@main
       with:
-        ttl-uuid: ${{ inputs.ttl-uuid }}
+        ttl-uuid: ${{ inputs.registry == '' && inputs.ttl-uuid || '' }}
+        registry: ${{ inputs.registry }}
         ttl-tag: ${{ inputs.ttl-tag }}
         artifact: ${{ steps.parse.outputs.image }}
         artifact_key: ${{ steps.parse.outputs.suffix }}
