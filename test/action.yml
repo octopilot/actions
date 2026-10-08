@@ -13,6 +13,13 @@ inputs:
       and optionally command.
       In the calling workflow pass: pipeline-context: toJson(matrix)
     required: true
+  image_registry:
+    description: >
+      Registry to pull images through, keeping their paths (the Kind node
+      image kindest/node -> <registry>/kindest/node). Default:
+      $OCTOPILOT_IMAGE_REGISTRY; unset, as written.
+    required: false
+    default: ''
 
 runs:
   using: "composite"
@@ -150,12 +157,20 @@ runs:
         sudo mv /tmp/linux-amd64/helm /usr/local/bin/helm
         helm version --short
 
+    - name: Kind node image
+      id: kind_image
+      if: steps.ctx.outputs.language == 'helm'
+      shell: bash
+      env:
+        OCTOPILOT_IMAGE_REGISTRY: ${{ inputs.image_registry || env.OCTOPILOT_IMAGE_REGISTRY }}
+      run: echo "ref=$(bash "${{ github.action_path }}/../common/resolve-image.sh" kindest/node:v1.34.3)" >> "$GITHUB_OUTPUT"
+
     - name: Create Kind cluster (Kubernetes 1.34.3)
       if: steps.ctx.outputs.language == 'helm'
       uses: helm/kind-action@v1
       with:
         version: v0.31.0
-        node_image: kindest/node:v1.34.3
+        node_image: ${{ steps.kind_image.outputs.ref }}
         cluster_name: helm-test
         wait: 120s
 

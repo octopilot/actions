@@ -89,6 +89,18 @@ on:
           0 = unlimited (fine for GitHub-hosted runners, one VM per leg).
         type: number
         default: 0
+      image_registry:
+        description: >
+          Registry every image the pipeline pulls comes through, keeping its
+          path: the op builder, the action images, the Kind node image and
+          (op --image-registry) buildpack builders and run images. Typically a
+          pull-through mirror, e.g. an Artifact Registry virtual repository
+          us-docker.pkg.dev/<project>/<repo> (ghcr.io/octopilot/op ->
+          <registry>/octopilot/op, kindest/node -> <registry>/kindest/node).
+          Empty (default): images come from the registries written in the actions.
+          The runner must be able to pull from it (e.g. a docker credential helper).
+        type: string
+        default: ''
     secrets:
       # Declared (not just inherited) so the secrets context is reliably wired
       # into this workflow across repos/orgs. Callers pass `secrets: inherit`.
@@ -109,6 +121,8 @@ on:
 env:
   CARGO_TERM_COLOR: always
   RUST_BACKTRACE: 1
+  # Read by every octopilot action as the default for its image_registry input.
+  OCTOPILOT_IMAGE_REGISTRY: ${{ inputs.image_registry }}
 
 jobs:
   # ── 1. Auto-detect languages and versions from skaffold.yaml ───────────────
@@ -167,6 +181,7 @@ jobs:
         uses: octopilot/actions/test@main
         with:
           pipeline-context: ${{ toJson(matrix) }}
+          image_registry: ${{ inputs.image_registry }}
 
       # Deliverable legs (meta-build functions routed by reserved suffix):
       # lib = "build and test it all" / verified rev; binary = release
@@ -282,6 +297,7 @@ jobs:
           artifact: ${{ toJson(matrix) }}
           ttl-uuid: ${{ needs.integration-validate.outputs.uuid }}
           op_version: ${{ inputs.op_version }}
+          image_registry: ${{ inputs.image_registry }}
           cache_image: ${{ steps.cache.outputs.image || '' }}
 
       # ONE contract per leg: build_result.json (imageName + digested tag).
@@ -319,6 +335,7 @@ jobs:
     with:
       runner: ${{ inputs.runner }}
       op_version: ${{ inputs.op_version }}
+      image_registry: ${{ inputs.image_registry }}
       ttl_uuid: ${{ needs.integration-validate.outputs.uuid }}
       integration_max_parallel: ${{ inputs.integration_max_parallel }}
       matrix: ${{ toJson(fromJson(needs.detect.outputs.pipeline-context).integration_matrix_wave1) }}
@@ -412,11 +429,18 @@ jobs:
 
           echo "namespace=$NS  chart=$CHART_NAME  chart_ref=$CHART_REF"
 
+      - name: Kind node image
+        id: kind_image
+        uses: octopilot/actions/resolve-image@main
+        with:
+          ref: kindest/node:v1.34.3
+          image_registry: ${{ inputs.image_registry }}
+
       - name: Create Kind cluster (Kubernetes 1.34.3)
         uses: helm/kind-action@v1
         with:
           version: v0.31.0
-          node_image: kindest/node:v1.34.3
+          node_image: ${{ steps.kind_image.outputs.ref }}
           cluster_name: octopilot-integration
           wait: 120s
 
@@ -668,6 +692,7 @@ jobs:
         if: env.ANTHROPIC_API_KEY != ''
         uses: octopilot/actions/release@main
         with:
+          image_registry: ${{ inputs.image_registry }}
           version: ${{ github.ref_name }}
           since_tag: ${{ steps.prev_tag.outputs.tag }}
           provider: anthropic

@@ -17,6 +17,13 @@ inputs:
     description: 'Registry to push to (defaults to ttl.sh/owner-repo-sha).'
     required: false
     default: ''
+  image_registry:
+    description: >
+      Registry to pull images through, keeping their paths: the
+      octopilot-pipeline-tools image and (op --image-registry) buildpack
+      builders and run images. Default: $OCTOPILOT_IMAGE_REGISTRY; unset, as written.
+    required: false
+    default: ''
 outputs:
   image_ref:
     description: 'The full reference to the pushed ephemeral image'
@@ -33,6 +40,7 @@ runs:
         INPUT_REGISTRY: ${{ inputs.registry }}
         INPUT_PLATFORM: ${{ inputs.platform }}
         INPUT_OP_VERSION: ${{ inputs.op_version }}
+        OCTOPILOT_IMAGE_REGISTRY: ${{ inputs.image_registry || env.OCTOPILOT_IMAGE_REGISTRY }}
       run: |
         # Construct ephemeral tag
         SHORT_SHA=$(git rev-parse --short HEAD)
@@ -59,7 +67,7 @@ runs:
            IMAGE_TAG="latest"
         fi
         
-        IMAGE="ghcr.io/octopilot/octopilot-pipeline-tools:${IMAGE_TAG}"
+        IMAGE="$(bash "${{ github.action_path }}/../common/resolve-image.sh" "ghcr.io/octopilot/octopilot-pipeline-tools:${IMAGE_TAG}")"
         echo "Using builder image: $IMAGE"
 
         # Run op build in container
@@ -72,6 +80,7 @@ runs:
            -e DOCKER_METADATA_OUTPUT_VERSION="${TAG}" \
            -e GITHUB_ACTIONS="true" \
            -e CI="true" \
+           -e OP_IMAGE_REGISTRY="${OCTOPILOT_IMAGE_REGISTRY}" \
            --entrypoint /bin/sh \
            "$IMAGE" \
            -c "git config --global --add safe.directory /workspace && op build --repo '${IMAGE_NAME}' --platform '${INPUT_PLATFORM}' --push"

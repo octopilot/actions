@@ -42,6 +42,12 @@ inputs:
       on fork PRs. Requires op v1.1.2+ (cache-image registry auth; older op fails UNAUTHORIZED).
     required: false
     default: ''
+  image_registry:
+    description: >
+      Registry to pull images through (op image, buildpack builders, run
+      images), keeping their paths. Default: $OCTOPILOT_IMAGE_REGISTRY; unset, as written.
+    required: false
+    default: ''
 runs:
   using: "composite"
   steps:
@@ -102,6 +108,7 @@ runs:
         artifact_key: ${{ steps.parse.outputs.suffix }}
         op_version: ${{ inputs.op_version }}
         docker_host: ${{ inputs.docker_host }}
+        image_registry: ${{ inputs.image_registry || env.OCTOPILOT_IMAGE_REGISTRY }}
         cache_image: ${{ inputs.cache_image }}
         from_build_result: ${{ inputs.from_build_result }}
         run_image_override: ${{ steps.runimage.outputs.override }}
@@ -117,6 +124,7 @@ runs:
         artifact_key: ${{ steps.parse.outputs.suffix }}
         op_version: ${{ inputs.op_version }}
         docker_host: ${{ inputs.docker_host }}
+        image_registry: ${{ inputs.image_registry || env.OCTOPILOT_IMAGE_REGISTRY }}
 
     - name: Chart requires skaffold artifact
       if: steps.parse.outputs.type == 'chart' && steps.parse.outputs.image == ''

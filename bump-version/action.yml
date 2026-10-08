@@ -12,15 +12,37 @@ inputs:
   file:
     description: 'Path to version file (default: internal/cmd/version.go for go, Cargo.toml for rust)'
     required: false
+  image_registry:
+    description: >
+      Registry to pull this action's image from, keeping its path
+      (ghcr.io/octopilot/actions/bump-version -> <registry>/octopilot/actions/bump-version).
+      Default: $OCTOPILOT_IMAGE_REGISTRY, else ghcr.io.
+    required: false
+    default: ''
+  image_tag:
+    description: 'Tag of the action image.'
+    required: false
+    default: 'latest'
 outputs:
   version:
     description: 'The new version'
+    value: ${{ steps.run.outputs.version }}
   old_version:
     description: 'The previous version'
+    value: ${{ steps.run.outputs.old_version }}
+
+# Composite rather than `using: docker`: a docker action's image is fixed in this file, so it could not be pulled from
+# a mirror. common/run-action-image.sh runs the same image the way the runner runs docker actions.
 runs:
-  using: 'docker'
-  image: 'docker://ghcr.io/octopilot/actions/bump-version:latest'
-  env:
-    INPUT_MODE: ${{ inputs.mode }}
-    INPUT_BUMP: ${{ inputs.bump }}
-    INPUT_FILE: ${{ inputs.file }}
+  using: 'composite'
+  steps:
+    - name: Run bump-version
+      id: run
+      shell: bash
+      env:
+        INPUT_MODE: ${{ inputs.mode }}
+        INPUT_BUMP: ${{ inputs.bump }}
+        INPUT_FILE: ${{ inputs.file }}
+        OCTOPILOT_IMAGE_REGISTRY: ${{ inputs.image_registry || env.OCTOPILOT_IMAGE_REGISTRY }}
+        OCTOPILOT_ACTION_IMAGE_TAG: ${{ inputs.image_tag }}
+      run: bash "${{ github.action_path }}/../common/run-action-image.sh" octopilot/actions/bump-version

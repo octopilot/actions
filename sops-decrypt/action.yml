@@ -22,17 +22,37 @@ inputs:
     description: 'Export decrypted secrets as environment variables'
     default: 'false'
     required: false
+  image_registry:
+    description: >
+      Registry to pull this action's image from, keeping its path
+      (ghcr.io/octopilot/actions/sops-decrypt -> <registry>/octopilot/actions/sops-decrypt).
+      Default: $OCTOPILOT_IMAGE_REGISTRY, else ghcr.io.
+    required: false
+    default: ''
+  image_tag:
+    description: 'Tag of the action image.'
+    required: false
+    default: 'latest'
 outputs:
   data:
     description: 'Decrypted data'
-    value: ${{ steps.decrypt.outputs.data }}
+    value: ${{ steps.run.outputs.data }}
+
+# Composite rather than `using: docker`: a docker action's image is fixed in this file, so it could not be pulled from
+# a mirror. common/run-action-image.sh runs the same image the way the runner runs docker actions.
 runs:
-  using: 'docker'
-  image: 'docker://ghcr.io/octopilot/actions/sops-decrypt:latest'
-  env:
-    INPUT_FILE: ${{ inputs.file }}
-    INPUT_GPG_KEY: ${{ inputs.gpg_key }}
-    INPUT_AGE_KEY: ${{ inputs.age_key }}
-    INPUT_OUTPUT_TYPE: ${{ inputs.output_type }}
-    INPUT_EXPORT_ENVS: ${{ inputs.export_envs }}
-    INPUT_VERSION: ${{ inputs.version }}
+  using: 'composite'
+  steps:
+    - name: Run sops-decrypt
+      id: run
+      shell: bash
+      env:
+        INPUT_FILE: ${{ inputs.file }}
+        INPUT_GPG_KEY: ${{ inputs.gpg_key }}
+        INPUT_AGE_KEY: ${{ inputs.age_key }}
+        INPUT_OUTPUT_TYPE: ${{ inputs.output_type }}
+        INPUT_EXPORT_ENVS: ${{ inputs.export_envs }}
+        INPUT_VERSION: ${{ inputs.version }}
+        OCTOPILOT_IMAGE_REGISTRY: ${{ inputs.image_registry || env.OCTOPILOT_IMAGE_REGISTRY }}
+        OCTOPILOT_ACTION_IMAGE_TAG: ${{ inputs.image_tag }}
+      run: bash "${{ github.action_path }}/../common/run-action-image.sh" octopilot/actions/sops-decrypt

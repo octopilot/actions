@@ -140,12 +140,6 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - name: Use Ephemeral Image
-        run: |
-          # Replace the GHCR image with the ttl.sh image for this test run
-          sed -i "s|image: 'docker://ghcr.io/octopilot/actions/read-properties:latest'|image: 'docker://ttl.sh/octopilot/actions/read-properties:${{ github.sha }}-1h'|g" read-properties/action.yml
-          cat read-properties/action.yml | grep "image:"
-
       - name: Create dummy properties file
         run: |
           echo "FOO=bar" > test.properties
@@ -157,6 +151,9 @@ jobs:
         uses: ./read-properties
         with:
           file: test.properties
+          # The image this run built, through the same override callers use for a mirror.
+          image_registry: ttl.sh
+          image_tag: ${{ github.sha }}-1h
 
       - name: Verify Environment Variables
         if: steps.read_props.outcome == 'success'
@@ -171,11 +168,6 @@ jobs:
     needs: build-actions
     steps:
       - uses: actions/checkout@v7
-
-      - name: Use Ephemeral Image
-        run: |
-          sed -i "s|image: 'docker://ghcr.io/octopilot/actions/sops-decrypt:latest'|image: 'docker://ttl.sh/octopilot/actions/sops-decrypt:${{ github.sha }}-1h'|g" sops-decrypt/action.yml
-          cat sops-decrypt/action.yml | grep "image:"
 
       - name: Set up Python
         uses: actions/setup-python@v7

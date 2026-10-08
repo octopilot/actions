@@ -20,6 +20,7 @@ Official GitHub Actions for the Octopilot ecosystem. This monorepo contains a su
 | [**is-tag**](is-tag/README.md) | Checks if the current commit is a tag. |
 | [**previous-tag**](previous-tag/README.md) | Finds the previous tag relative to the current commit. |
 | [**kotlin-lint**](kotlin-lint/README.md) | Runs ktlint with Checkstyle XML and PR annotations via action-ktlint. |
+| [**resolve-image**](resolve-image/action.yml) | Where to pull an image from, honouring `image_registry` (the rule every action uses). |
 | [**scale-min-replicas**](scale-min-replicas/README.md) | DST- and timezone-aware day/night scaling of a Helm values key (e.g. `minReplicas`) with Sunday-rest hold, safe-UTC-cron-band computation, and commit + push. |
 
 ## Documentation
@@ -30,6 +31,7 @@ Official GitHub Actions for the Octopilot ecosystem. This monorepo contains a su
 | [Rust images](docs/rust-images.md) | Where the binary lands, which process starts it, and why `BP_RUST_BINARY_NAME` is not how you name a service. |
 | [Ecosystem and dependencies](docs/ECOSYSTEM-AND-DEPENDENCIES.md) | `hack/ci-deps`, `hack/test-deps`, and the Flux overlay. |
 | [Integration build](docs/INTEGRATION-BUILD-OCTOPILOT.md) | `build_result.json` and the ttl.sh contract. |
+| [Image sources](docs/image-sources.md) | `image_registry`: pull every image through your own registry (e.g. Artifact Registry). |
 
 ## Usage
 

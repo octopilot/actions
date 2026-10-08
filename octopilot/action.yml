@@ -65,6 +65,16 @@ inputs:
     description: 'name=ref passed to op --run-image-override. name is the skaffold runImage string; ref is the image this run built.'
     required: false
     default: ''
+  image_registry:
+    description: >
+      Registry to pull images through, keeping their paths: the op image itself
+      (ghcr.io/octopilot/op -> <registry>/octopilot/op) and, via op
+      --image-registry, buildpack builders and run images. Typically a
+      pull-through mirror such as an Artifact Registry virtual repository
+      (us-docker.pkg.dev/<project>/<repo>). Default: $OCTOPILOT_IMAGE_REGISTRY;
+      unset, every image is pulled as written.
+    required: false
+    default: ''
 outputs:
   digest:
     description: 'Container image digest (e.g. sha256:...).'
@@ -94,6 +104,7 @@ runs:
         INPUT_CACHE_IMAGE: ${{ inputs.cache_image }}
         INPUT_FROM_BUILD_RESULT: ${{ inputs.from_build_result }}
         INPUT_RUN_IMAGE_OVERRIDE: ${{ inputs.run_image_override }}
+        OCTOPILOT_IMAGE_REGISTRY: ${{ inputs.image_registry || env.OCTOPILOT_IMAGE_REGISTRY }}
       run: |
         # Determine version
         VERSION="${INPUT_VERSION}"
@@ -126,6 +137,7 @@ runs:
             export GITHUB_ACTIONS="true"
             export CI="true"
             export OP_CACHE_IMAGE="${INPUT_CACHE_IMAGE}"
+            export OP_IMAGE_REGISTRY="${OCTOPILOT_IMAGE_REGISTRY}"
             
             # Ensure safe directory
             git config --global --add safe.directory "$GITHUB_WORKSPACE"
@@ -153,8 +165,11 @@ runs:
                 IMAGE_TAG="latest"
             fi
             
-            IMAGE="ghcr.io/octopilot/op:${IMAGE_TAG}"
+            IMAGE="$(bash "${{ github.action_path }}/../common/resolve-image.sh" "ghcr.io/octopilot/op:${IMAGE_TAG}")"
             echo "Using builder image: $IMAGE"
+            if [ -n "${OCTOPILOT_IMAGE_REGISTRY}" ]; then
+              echo "Images pulled through: ${OCTOPILOT_IMAGE_REGISTRY} (op --image-registry)"
+            fi
 
             # When DOCKER_HOST is set (e.g. DinD), use it instead of the socket so op can create containers.
             DOCKER_ARGS=()
@@ -192,7 +207,7 @@ runs:
             if [ -f "${HOME}/.docker/config.json" ]; then
               echo "[auth] runner docker config: present; registries: $(jq -r '.auths | keys | join(",")' "${HOME}/.docker/config.json" 2>/dev/null || echo unparseable)"
               if jq -e '.credsStore // .credHelpers' "${HOME}/.docker/config.json" >/dev/null 2>&1; then
-                echo "::warning::[auth] docker config uses a credential helper; inlined config may lack secrets (helpers don't run in the build container)"
+                echo "::warning::[auth] docker config uses a credential helper; helpers don't run in the build container (op uses Google credentials for gcr.io/*.pkg.dev instead)"
               fi
               DOCKER_CONFIG_CONTENT="$(cat "${HOME}/.docker/config.json")"
             else
@@ -219,6 +234,7 @@ runs:
                 -e OP_CACHE_IMAGE="${INPUT_CACHE_IMAGE}" \
                 -e OP_FROM_BUILD_RESULT="${INPUT_FROM_BUILD_RESULT}" \
                 -e OP_RUN_IMAGE_OVERRIDE="${INPUT_RUN_IMAGE_OVERRIDE}" \
+                -e OP_IMAGE_REGISTRY="${OCTOPILOT_IMAGE_REGISTRY}" \
                 -e GITHUB_TOKEN="${GITHUB_TOKEN}" \
                 -e DOCKER_CONFIG_CONTENT="$DOCKER_CONFIG_CONTENT" \
                 --entrypoint /bin/sh \

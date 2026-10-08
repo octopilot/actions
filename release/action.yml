@@ -26,13 +26,42 @@ inputs:
     description: 'Output file name under repo root (e.g. release-body.md)'
     required: false
     default: 'release_notes.md'
-
+  image_registry:
+    description: >
+      Registry to pull this action's image from, keeping its path
+      (ghcr.io/octopilot/actions/release -> <registry>/octopilot/actions/release).
+      Default: $OCTOPILOT_IMAGE_REGISTRY, else ghcr.io.
+    required: false
+    default: ''
+  image_tag:
+    description: 'Tag of the action image.'
+    required: false
+    default: 'latest'
 outputs:
   body_file:
     description: 'Path to the generated release notes file (relative to repo root)'
+    value: ${{ steps.run.outputs.body_file }}
   body:
     description: 'Release notes body content'
+    value: ${{ steps.run.outputs.body }}
 
+# Composite rather than `using: docker`: a docker action's image is fixed in this file, so it could not be pulled from
+# a mirror. common/run-action-image.sh runs the same image the way the runner runs docker actions.
 runs:
-  using: 'docker'
-  image: 'docker://ghcr.io/octopilot/actions/release:latest'
+  using: 'composite'
+  steps:
+    - name: Run release
+      id: run
+      shell: bash
+      env:
+        INPUT_VERSION: ${{ inputs.version }}
+        INPUT_SINCE_TAG: ${{ inputs.since_tag }}
+        INPUT_TEMPLATE_PATH: ${{ inputs.template_path }}
+        INPUT_TEMPLATE: ${{ inputs.template }}
+        INPUT_PROVIDER: ${{ inputs.provider }}
+        INPUT_MODEL: ${{ inputs.model }}
+        INPUT_OUTPUT_FILENAME: ${{ inputs.output_filename }}
+        OCTOPILOT_IMAGE_REGISTRY: ${{ inputs.image_registry || env.OCTOPILOT_IMAGE_REGISTRY }}
+        OCTOPILOT_ACTION_IMAGE_TAG: ${{ inputs.image_tag }}
+        OCTOPILOT_PASS_ENV: ANTHROPIC_API_KEY OPENAI_API_KEY ANTHROPIC_MODEL OPENAI_MODEL RELEASE_NOTES_PROVIDER
+      run: bash "${{ github.action_path }}/../common/run-action-image.sh" octopilot/actions/release
