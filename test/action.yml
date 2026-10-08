@@ -30,6 +30,10 @@ runs:
         echo "version=$(echo "$PIPELINE_CONTEXT"   | jq -r '.version  // ""')"   >> "$GITHUB_OUTPUT"
         # workdir: where the toolchain lives (a nested workspace, BP_RUST_WORKSPACE_DIR); the build context otherwise
         echo "context=$(echo "$PIPELINE_CONTEXT"   | jq -r '.workdir // .context // "."')"  >> "$GITHUB_OUTPUT"
+        # CARGO_TARGET_DIR is $GITHUB_WORKSPACE/target for every leg; rust-cache names it relative to the workspace root
+        WD="$(echo "$PIPELINE_CONTEXT" | jq -r '.workdir // .context // "."')"
+        UP=""; [ "$WD" = "." ] || UP="$(echo "${WD%/}" | sed 's|[^/][^/]*|..|g')/"
+        echo "target_rel=${UP}target" >> "$GITHUB_OUTPUT"
         echo "command=$(echo "$PIPELINE_CONTEXT"   | jq -r '.command  // ""')"   >> "$GITHUB_OUTPUT"
         NAME="$(echo "$PIPELINE_CONTEXT" | jq -r '.name // .context // "unknown"')"
         echo "name=$NAME" >> "$GITHUB_OUTPUT"
@@ -101,6 +105,18 @@ runs:
       uses: dtolnay/rust-toolchain@master
       with:
         toolchain: ${{ steps.ctx.outputs.version || 'stable' }}
+
+    # Compiled dependencies (target/, including cargo-llvm-cov's llvm-cov-target): a whole-workspace suite spends most of
+    # its time here. rust-cache keeps third-party artefacts and drops the workspace's own crates, keys on the toolchain,
+    # Cargo.lock and the leg, and saves even when tests fail, so a red run still warms the next one.
+    - name: Cache compiled dependencies (Rust)
+      if: steps.ctx.outputs.language == 'rust'
+      uses: Swatinem/rust-cache@v2
+      with:
+        workspaces: ${{ steps.ctx.outputs.context }} -> ${{ steps.ctx.outputs.target_rel }}
+        key: ${{ steps.ctx.outputs.name_slug }}
+        cache-on-failure: "true"
+        cache-all-crates: "true"
 
     # Cache Cargo registry + rustup + extracted binaries (not target/).
     - name: Cache Cargo and rustup
