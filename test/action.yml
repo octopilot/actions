@@ -28,7 +28,8 @@ runs:
       run: |
         echo "language=$(echo "$PIPELINE_CONTEXT"  | jq -r '.language')"         >> "$GITHUB_OUTPUT"
         echo "version=$(echo "$PIPELINE_CONTEXT"   | jq -r '.version  // ""')"   >> "$GITHUB_OUTPUT"
-        echo "context=$(echo "$PIPELINE_CONTEXT"   | jq -r '.context  // "."')"  >> "$GITHUB_OUTPUT"
+        # workdir: where the toolchain lives (a nested workspace, BP_RUST_WORKSPACE_DIR); the build context otherwise
+        echo "context=$(echo "$PIPELINE_CONTEXT"   | jq -r '.workdir // .context // "."')"  >> "$GITHUB_OUTPUT"
         echo "command=$(echo "$PIPELINE_CONTEXT"   | jq -r '.command  // ""')"   >> "$GITHUB_OUTPUT"
         NAME="$(echo "$PIPELINE_CONTEXT" | jq -r '.name // .context // "unknown"')"
         echo "name=$NAME" >> "$GITHUB_OUTPUT"
