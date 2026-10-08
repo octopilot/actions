@@ -91,6 +91,20 @@ runs:
         fi
         echo "override=${RUN_IMAGE}=${tag}" >> "$GITHUB_OUTPUT"
 
+    - name: Version the chart from the release tag
+      # The release promotes this chart to <chart>:<tag>; its version must be that tag (Flux rejects a mismatch) and
+      # its appVersion the images' release tag. A chart can be a helm artifact or a buildpack one (the helm buildpack,
+      # built by the image step), so this keys on a Chart.yaml in the context, not on the type. Other refs build the
+      # chart as written.
+      if: github.ref_type == 'tag'
+      shell: bash
+      env:
+        CHART_DIR: ${{ steps.parse.outputs.context }}
+        TAG: ${{ github.ref_name }}
+      run: |
+        [ -f "${CHART_DIR%/}/Chart.yaml" ] || exit 0
+        "${{ github.action_path }}/../common/stamp-chart-version.sh" "$CHART_DIR" "$TAG"
+
     - name: Build and push image (Octopilot)
       id: build
       if: steps.parse.outputs.type == 'image'
@@ -105,16 +119,6 @@ runs:
         cache_image: ${{ inputs.cache_image }}
         from_build_result: ${{ inputs.from_build_result }}
         run_image_override: ${{ steps.runimage.outputs.override }}
-
-    - name: Version the chart from the release tag
-      # The release promotes this chart to <chart>:<tag>; its version must be that tag (Flux rejects a mismatch) and
-      # its appVersion the images' release tag. Other refs build the chart as written.
-      if: steps.parse.outputs.type == 'chart' && github.ref_type == 'tag'
-      shell: bash
-      env:
-        CHART_DIR: ${{ steps.parse.outputs.context }}
-        TAG: ${{ github.ref_name }}
-      run: '"${{ github.action_path }}/../common/stamp-chart-version.sh" "$CHART_DIR" "$TAG"'
 
     - name: Build and push chart (Octopilot)
       id: chart_build
