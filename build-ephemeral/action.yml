@@ -42,6 +42,9 @@ runs:
         INPUT_OP_VERSION: ${{ inputs.op_version }}
         OCTOPILOT_IMAGE_REGISTRY: ${{ inputs.image_registry || env.OCTOPILOT_IMAGE_REGISTRY }}
       run: |
+        # The input / workflow value, else the runner's own mirror (OCTOPILOT_RUNNER_IMAGE_REGISTRY on self-hosted pods).
+        OCTOPILOT_IMAGE_REGISTRY="${OCTOPILOT_IMAGE_REGISTRY:-${OCTOPILOT_RUNNER_IMAGE_REGISTRY:-}}"
+
         # Construct ephemeral tag
         SHORT_SHA=$(git rev-parse --short HEAD)
         TTL="${INPUT_TTL}"

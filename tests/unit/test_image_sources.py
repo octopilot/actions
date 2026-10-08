@@ -58,6 +58,22 @@ def test_resolve_with_registry(ref: str, want: str) -> None:
     assert resolve(ref, env={"OCTOPILOT_IMAGE_REGISTRY": MIRROR}) == want
 
 
+def test_runner_level_registry_is_the_fallback() -> None:
+    runner = {"OCTOPILOT_RUNNER_IMAGE_REGISTRY": MIRROR}
+    assert resolve("kindest/node:v1.34.3", env=runner) == f"{MIRROR}/kindest/node:v1.34.3"
+    # an empty workflow value (what a composite step's env yields when unset) does not shadow the runner's
+    assert (
+        resolve("kindest/node:v1.34.3", env={**runner, "OCTOPILOT_IMAGE_REGISTRY": ""})
+        == f"{MIRROR}/kindest/node:v1.34.3"
+    )
+    # the workflow's own value wins
+    other = "europe-docker.pkg.dev/p/ci"
+    assert (
+        resolve("kindest/node:v1.34.3", env={**runner, "OCTOPILOT_IMAGE_REGISTRY": other})
+        == f"{other}/kindest/node:v1.34.3"
+    )
+
+
 @pytest.mark.parametrize("ref", ["ghcr.io/octopilot/op:v1.2.0", "kindest/node:v1.34.3", "hello-world:latest"])
 def test_resolve_unset_keeps_the_default(ref: str) -> None:
     assert resolve(ref) == ref

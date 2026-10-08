@@ -35,6 +35,9 @@ A registry that does not keep upstream paths will not work.
   `OCTOPILOT_IMAGE_REGISTRY` for every job, and pass it to each octopilot action they call.
 - **Composite actions** take `image_registry`; when it is empty they read `OCTOPILOT_IMAGE_REGISTRY`, so a workflow can
   set it once at job or workflow level. Nested actions receive it explicitly.
+- **The runner** can declare its own mirror: `OCTOPILOT_RUNNER_IMAGE_REGISTRY` in the runner's environment (e.g. on
+  self-hosted runner pods next to an Artifact Registry) is used when neither the input nor the workflow sets one, so every
+  job on those runners pulls through it with no workflow change.
 - **Action images** (`bump-version`, `kubernetes-auth`, `read-properties`, `release`, `rotate-secret`,
   `sops-decrypt`) are composite actions that run their image with `common/run-action-image.sh`, the way the runner runs a
   `using: docker` action (workspace at `/github/workspace`, `INPUT_*`/`GITHUB_*` passed, outputs and exported variables

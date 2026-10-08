@@ -5,7 +5,8 @@
 # runner runs a `using: docker` action, so the image can come from a configurable registry. A docker action's
 # `image: docker://...` is fixed in its metadata; a composite action calling this script is not:
 #
-#   OCTOPILOT_IMAGE_REGISTRY    registry to pull from, keeping the path (see resolve-image.sh); default ghcr.io
+#   OCTOPILOT_IMAGE_REGISTRY    registry to pull from, keeping the path (see resolve-image.sh); default
+#                               $OCTOPILOT_RUNNER_IMAGE_REGISTRY (the runner's own mirror), else ghcr.io
 #   OCTOPILOT_ACTION_IMAGE_TAG  image tag; default latest
 #   OCTOPILOT_PASS_ENV          extra variable names to pass into the container (e.g. API keys)
 #

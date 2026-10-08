@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
 # resolve-image.sh REF [REGISTRY]
 #
-# Prints the reference to pull for REF. With no registry (REGISTRY, else $OCTOPILOT_IMAGE_REGISTRY), REF is printed as
-# written: the value in the action is the default. With a registry, typically a pull-through mirror such as an Artifact
-# Registry virtual repository, REF's registry is replaced and its repository path kept; the same rule as
-# `op build --image-registry`:
+# Prints the reference to pull for REF. With no registry (REGISTRY, else $OCTOPILOT_IMAGE_REGISTRY, else
+# $OCTOPILOT_RUNNER_IMAGE_REGISTRY), REF is printed as written: the value in the action is the default.
+# OCTOPILOT_RUNNER_IMAGE_REGISTRY is for the runner itself (set on self-hosted runner pods), so every job there pulls
+# through its mirror without each workflow saying so; a workflow's image_registry still wins.
+#
+# With a registry, typically a pull-through mirror such as an Artifact Registry virtual repository, REF's registry is
+# replaced and its repository path kept; the same rule as `op build --image-registry`:
 #
 #   ghcr.io/octopilot/op:v1.2.0   ->  <registry>/octopilot/op:v1.2.0
 #   kindest/node:v1.34.3          ->  <registry>/kindest/node:v1.34.3
@@ -15,7 +18,7 @@
 set -euo pipefail
 
 ref="${1:?usage: resolve-image.sh REF [REGISTRY]}"
-if [ "$#" -ge 2 ]; then registry="$2"; else registry="${OCTOPILOT_IMAGE_REGISTRY:-}"; fi
+if [ "$#" -ge 2 ]; then registry="$2"; else registry="${OCTOPILOT_IMAGE_REGISTRY:-${OCTOPILOT_RUNNER_IMAGE_REGISTRY:-}}"; fi
 registry="${registry%/}"
 
 if [ -z "$registry" ]; then
