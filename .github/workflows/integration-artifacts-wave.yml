@@ -19,6 +19,29 @@ on:
         description: ttl.sh UUID from integration-validate.
         type: string
         required: true
+      integration_registry:
+        description: >
+          Private registry for integration artifacts (e.g. us-docker.pkg.dev/<project>/integration). Empty: ttl.sh, a
+          public registry, the default. A repository's artifacts go under <registry>/<repository name>; the release
+          job promotes them from there by digest. The integration deploy (Kind) needs ttl.sh for now.
+        type: string
+        required: false
+        default: ''
+      registry_auth:
+        description: "How jobs log in to integration_registry: gcp-wif (Workload Identity Federation), or empty for ambient runner credentials."
+        type: string
+        required: false
+        default: ''
+      gcp_workload_identity_provider:
+        description: 'registry_auth gcp-wif: projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>.'
+        type: string
+        required: false
+        default: ''
+      gcp_service_account:
+        description: 'registry_auth gcp-wif: service account with write on integration_registry.'
+        type: string
+        required: false
+        default: ''
       integration_max_parallel:
         description: Cap on concurrent legs. 0 means unlimited.
         type: number
@@ -32,9 +55,11 @@ jobs:
   build:
     name: Integration (${{ matrix.suffix || matrix.output_key }})
     runs-on: ${{ (startsWith(inputs.runner, '[') && fromJSON(inputs.runner)) || inputs.runner }}
+    # id-token: write: integration_registry over Workload Identity Federation (the caller grants it).
     permissions:
       contents: read
       packages: write
+      id-token: write
     timeout-minutes: 45
     strategy:
       fail-fast: false
@@ -43,6 +68,15 @@ jobs:
         include: ${{ fromJson(inputs.matrix) }}
     steps:
       - uses: actions/checkout@v7
+
+      - name: Integration registry
+        id: ireg
+        uses: octopilot/actions/integration-registry@main
+        with:
+          registry: ${{ inputs.integration_registry }}
+          auth: ${{ inputs.registry_auth }}
+          workload_identity_provider: ${{ inputs.gcp_workload_identity_provider }}
+          service_account: ${{ inputs.gcp_service_account }}
 
       # Pack build-cache as a GHCR image: push + workflow_dispatch only — fork
       # PRs have no write token, and the cache needs a STABLE name across runs
@@ -102,6 +136,7 @@ jobs:
         with:
           artifact: ${{ toJson(matrix) }}
           ttl-uuid: ${{ inputs.ttl_uuid }}
+          registry: ${{ steps.ireg.outputs.registry }}
           op_version: ${{ inputs.op_version }}
           cache_image: ${{ steps.cache.outputs.image || '' }}
           from_build_result: wave0-build_result.json

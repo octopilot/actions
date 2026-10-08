@@ -80,6 +80,25 @@ on:
         description: "deployment-configuration profile environment to apply (e.g. dev, ci)."
         type: string
         default: dev
+      integration_registry:
+        description: >
+          Private registry for integration artifacts (e.g. us-docker.pkg.dev/<project>/integration). Empty: ttl.sh, a
+          public registry, the default. A repository's artifacts go under <registry>/<repository name>; the release
+          job promotes them from there by digest. The integration deploy (Kind) needs ttl.sh for now.
+        type: string
+        default: ''
+      registry_auth:
+        description: "How jobs log in to integration_registry: gcp-wif (Workload Identity Federation), or empty for ambient runner credentials."
+        type: string
+        default: ''
+      gcp_workload_identity_provider:
+        description: 'registry_auth gcp-wif: projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>.'
+        type: string
+        default: ''
+      gcp_service_account:
+        description: 'registry_auth gcp-wif: service account with write on integration_registry.'
+        type: string
+        default: ''
       integration_max_parallel:
         description: >
           Cap on concurrently running integration artifact legs. Essential on
@@ -219,9 +238,11 @@ jobs:
     # packages:write lets the job push the pack build-cache image to GHCR
     # (warm buildpack caches across ephemeral runners). Other permissions
     # revert to restrictive defaults once any permission is declared.
+    # id-token: write: integration_registry over Workload Identity Federation (the caller grants it).
     permissions:
       contents: read
       packages: write
+      id-token: write
     # Hard cap — a hung test must fail the job, not burn 6h of runner time.
     timeout-minutes: 45
     strategy:
@@ -232,6 +253,15 @@ jobs:
         include: ${{ fromJson(needs.detect.outputs.pipeline-context).integration_matrix_wave0 }}
     steps:
       - uses: actions/checkout@v7
+
+      - name: Integration registry
+        id: ireg
+        uses: octopilot/actions/integration-registry@main
+        with:
+          registry: ${{ inputs.integration_registry }}
+          auth: ${{ inputs.registry_auth }}
+          workload_identity_provider: ${{ inputs.gcp_workload_identity_provider }}
+          service_account: ${{ inputs.gcp_service_account }}
 
       # Pack build-cache as a GHCR image: push + workflow_dispatch only — fork
       # PRs have no write token, and the cache needs a STABLE name across runs
@@ -281,6 +311,7 @@ jobs:
         with:
           artifact: ${{ toJson(matrix) }}
           ttl-uuid: ${{ needs.integration-validate.outputs.uuid }}
+          registry: ${{ steps.ireg.outputs.registry }}
           op_version: ${{ inputs.op_version }}
           cache_image: ${{ steps.cache.outputs.image || '' }}
 
@@ -312,14 +343,20 @@ jobs:
     name: Integration (dependents)
     needs: [detect, integration-validate, integration-artifacts]
     if: toJSON(fromJson(needs.detect.outputs.pipeline-context).integration_matrix_wave1) != '[]'
+    # id-token: write: integration_registry over Workload Identity Federation (the caller grants it).
     permissions:
       contents: read
       packages: write
+      id-token: write
     uses: octopilot/actions/.github/workflows/integration-artifacts-wave.yml@main
     with:
       runner: ${{ inputs.runner }}
       op_version: ${{ inputs.op_version }}
       ttl_uuid: ${{ needs.integration-validate.outputs.uuid }}
+      integration_registry: ${{ inputs.integration_registry }}
+      registry_auth: ${{ inputs.registry_auth }}
+      gcp_workload_identity_provider: ${{ inputs.gcp_workload_identity_provider }}
+      gcp_service_account: ${{ inputs.gcp_service_account }}
       integration_max_parallel: ${{ inputs.integration_max_parallel }}
       matrix: ${{ toJson(fromJson(needs.detect.outputs.pipeline-context).integration_matrix_wave1) }}
 
@@ -352,6 +389,13 @@ jobs:
     env:
       SOPS_AGE_KEY: ${{ secrets.SOPS_AGE_KEY }}
     steps:
+      - name: Integration deploy needs ttl.sh artifacts
+        if: inputs.integration_registry != ''
+        shell: bash
+        run: |
+          echo "::error::The Kind integration deploy pulls without registry credentials; integration_registry needs integration: false for now."
+          exit 1
+
       - uses: actions/checkout@v7
 
       - name: Download artifact outputs
@@ -550,6 +594,7 @@ jobs:
     permissions:
       contents: write
       packages: write
+      id-token: write   # read integration_registry (gcp-wif)
     # Surfaced via env so steps can gate on presence — the `secrets` context is
     # not permitted in step `if:` expressions.
     env:
@@ -558,6 +603,15 @@ jobs:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0   # previous-tag + release notes need full tag history
+
+      - name: Integration registry
+        id: ireg
+        uses: octopilot/actions/integration-registry@main
+        with:
+          registry: ${{ inputs.integration_registry }}
+          auth: ${{ inputs.registry_auth }}
+          workload_identity_provider: ${{ inputs.gcp_workload_identity_provider }}
+          service_account: ${{ inputs.gcp_service_account }}
 
       - name: Download integration artifact outputs
         if: needs.integration-artifacts.result == 'success' && (needs.integration-artifacts-wave1.result == 'success' || needs.integration-artifacts-wave1.result == 'skipped')

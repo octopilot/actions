@@ -1,0 +1,83 @@
+name: 'Integration registry'
+description: >
+  Where a run's integration artifacts go, logged in for the rest of the job. With no registry: ttl.sh, a public
+  registry and the default (op names the artifacts ttl.sh/<uuid>-<key>). With one: a private registry, the
+  repository's artifacts under <registry>/<repository name, lower-case>; the release job promotes them from there
+  by digest. auth gcp-wif exchanges the job's OIDC token (the caller grants id-token: write) for a short-lived
+  Artifact Registry token through Workload Identity Federation; no key is stored anywhere.
+
+inputs:
+  registry:
+    description: 'Private registry for integration artifacts (e.g. us-docker.pkg.dev/<project>/integration); empty means ttl.sh.'
+    required: false
+    default: ''
+  auth:
+    description: "How to log in: gcp-wif, or empty when the runner already holds credentials for the registry."
+    required: false
+    default: ''
+  workload_identity_provider:
+    description: 'gcp-wif: projects/<number>/locations/global/workloadIdentityPools/<pool>/providers/<provider>.'
+    required: false
+    default: ''
+  service_account:
+    description: 'gcp-wif: the service account to impersonate (needs write on the registry; read in the release job).'
+    required: false
+    default: ''
+
+outputs:
+  registry:
+    description: 'Registry to pass to integration-build-artifact; empty means ttl.sh.'
+    value: ${{ steps.where.outputs.registry }}
+
+runs:
+  using: composite
+  steps:
+    - name: Integration registry
+      id: where
+      shell: bash
+      env:
+        REGISTRY: ${{ inputs.registry }}
+        AUTH: ${{ inputs.auth }}
+        WIP: ${{ inputs.workload_identity_provider }}
+        SA: ${{ inputs.service_account }}
+      run: |
+        set -euo pipefail
+        if [ -z "$REGISTRY" ]; then
+          echo "registry=" >> "$GITHUB_OUTPUT"
+          echo "Integration artifacts: ttl.sh (public; set integration_registry for a private registry)"
+          exit 0
+        fi
+        case "$AUTH" in
+          "") ;;
+          gcp-wif)
+            if [ -z "$WIP" ] || [ -z "$SA" ]; then
+              echo "::error::registry_auth gcp-wif needs gcp_workload_identity_provider and gcp_service_account"
+              exit 1
+            fi ;;
+          *) echo "::error::registry_auth '$AUTH' is not supported (gcp-wif, or empty for ambient credentials)"; exit 1 ;;
+        esac
+        repo="$(printf '%s' "${GITHUB_REPOSITORY#*/}" | tr '[:upper:]' '[:lower:]')"
+        echo "registry=${REGISTRY%/}/${repo}" >> "$GITHUB_OUTPUT"
+        echo "host=${REGISTRY%%/*}" >> "$GITHUB_OUTPUT"
+        echo "Integration artifacts: ${REGISTRY%/}/${repo} (private)"
+
+    - name: Workload Identity Federation
+      id: gcp
+      if: inputs.registry != '' && inputs.auth == 'gcp-wif'
+      uses: google-github-actions/auth@v2
+      with:
+        workload_identity_provider: ${{ inputs.workload_identity_provider }}
+        service_account: ${{ inputs.service_account }}
+        token_format: access_token
+        access_token_lifetime: 3600s
+        # The checkout is the build context: no credentials file may land in it.
+        create_credentials_file: false
+        export_environment_variables: false
+
+    - name: Docker login
+      if: steps.gcp.outcome == 'success'
+      shell: bash
+      env:
+        TOKEN: ${{ steps.gcp.outputs.access_token }}
+        HOST: ${{ steps.where.outputs.host }}
+      run: printf '%s' "$TOKEN" | docker login -u oauth2accesstoken --password-stdin "https://${HOST}"
