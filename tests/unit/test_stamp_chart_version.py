@@ -69,7 +69,22 @@ def test_missing_chart_fails(tmp_path: Path) -> None:
 
 def test_integration_build_stamps_charts_on_tag_builds() -> None:
     action = yaml.safe_load((ROOT / "integration-build-artifact" / "action.yml").read_text())
-    names = [s.get("name", "") for s in action["runs"]["steps"]]
+    steps = action["runs"]["steps"]
+    names = [s.get("name", "") for s in steps]
+    stamp_step = next(s for s in steps if "stamp-chart-version.sh" in s.get("run", ""))
+    assert stamp_step["if"] == "github.ref_type == 'tag'", "any chart, also a buildpack-built one (type image)"
+    assert 'Chart.yaml" ] || exit 0' in stamp_step["run"], "contexts without a chart are left alone"
+    at = names.index(stamp_step["name"])
+    assert at < names.index("Build and push image (Octopilot)")
+    assert at < names.index("Build and push chart (Octopilot)")
+
+
+def test_stamp_step_skips_contexts_without_a_chart(tmp_path: Path) -> None:
+    action = yaml.safe_load((ROOT / "integration-build-artifact" / "action.yml").read_text())
     stamp_step = next(s for s in action["runs"]["steps"] if "stamp-chart-version.sh" in s.get("run", ""))
-    assert "github.ref_type == 'tag'" in stamp_step["if"]
-    assert names.index(stamp_step["name"]) < names.index("Build and push chart (Octopilot)")
+    script = stamp_step["run"].replace("${{ github.action_path }}/..", str(ROOT))
+    env = {"PATH": os.environ["PATH"], "TAG": "v0.1.2"}
+    subprocess.run(["bash", "-c", script], check=True, env={**env, "CHART_DIR": str(tmp_path)})
+    (tmp_path / "Chart.yaml").write_text(CHART)
+    subprocess.run(["bash", "-c", script], check=True, env={**env, "CHART_DIR": str(tmp_path)})
+    assert yaml.safe_load((tmp_path / "Chart.yaml").read_text())["version"] == "0.1.2"
