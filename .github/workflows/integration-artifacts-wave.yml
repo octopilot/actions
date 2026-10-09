@@ -15,6 +15,10 @@ on:
         description: Tag of ghcr.io/octopilot/op.
         type: string
         required: true
+      image_registry:
+        description: Registry images are pulled through, keeping their paths. Same contract as pipeline.yml; empty = as written.
+        type: string
+        default: ''
       ttl_uuid:
         description: ttl.sh UUID from integration-validate.
         type: string
@@ -50,6 +54,9 @@ on:
         description: JSON array of wave-1 integration matrix entries.
         type: string
         required: true
+
+env:
+  OCTOPILOT_IMAGE_REGISTRY: ${{ inputs.image_registry }}
 
 jobs:
   build:
@@ -138,6 +145,7 @@ jobs:
           ttl-uuid: ${{ inputs.ttl_uuid }}
           registry: ${{ steps.ireg.outputs.registry }}
           op_version: ${{ inputs.op_version }}
+          image_registry: ${{ inputs.image_registry }}
           cache_image: ${{ steps.cache.outputs.image || '' }}
           from_build_result: wave0-build_result.json
 

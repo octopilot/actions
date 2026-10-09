@@ -66,6 +66,7 @@ The result: a contributor can fork, push, and exercise the entire pipeline
 | `runner` | `ubuntu-24.04` | Runner label for all jobs. Pinned so `ubuntu-latest` moving to Ubuntu 26.04 on 19 October 2026 does not change the image. |
 | `op_version` | `v1.2.0` | `ghcr.io/octopilot/op` tag. Pin the release. `latest` and `main` are not this release. |
 | `actions_ref` | `main` | Ref the composite steps resolve to (pin alongside the workflow for reproducibility). |
+| `image_registry` | empty | Registry every pulled image comes through, keeping its path (see [Image sources](image-sources.md)). Empty: images come from the registries written in the actions. |
 
 Secrets are passed with `secrets: inherit`. The pipeline uses (all optional):
 

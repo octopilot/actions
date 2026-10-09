@@ -1,0 +1,32 @@
+name: 'Resolve image'
+description: >
+  Where to pull an image from: the reference as written, or, with a registry
+  configured, the same repository path on that registry (ghcr.io/x/y:t ->
+  <registry>/x/y:t, kindest/node:v1 -> <registry>/kindest/node:v1,
+  hello-world -> <registry>/library/hello-world). The rule op --image-registry
+  and every octopilot action use; see common/resolve-image.sh.
+inputs:
+  ref:
+    description: 'Image reference as written (the default).'
+    required: true
+  image_registry:
+    description: 'Registry to pull through. Default: $OCTOPILOT_IMAGE_REGISTRY; unset, ref is returned unchanged.'
+    required: false
+    default: ''
+outputs:
+  ref:
+    description: 'The reference to pull.'
+    value: ${{ steps.resolve.outputs.ref }}
+runs:
+  using: 'composite'
+  steps:
+    - name: Resolve
+      id: resolve
+      shell: bash
+      env:
+        REF: ${{ inputs.ref }}
+        OCTOPILOT_IMAGE_REGISTRY: ${{ inputs.image_registry || env.OCTOPILOT_IMAGE_REGISTRY }}
+      run: |
+        resolved="$(bash "${{ github.action_path }}/../common/resolve-image.sh" "$REF")"
+        echo "ref=${resolved}" >> "$GITHUB_OUTPUT"
+        echo "${REF} -> ${resolved}"

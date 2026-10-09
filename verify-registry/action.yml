@@ -34,6 +34,13 @@ inputs:
     description: 'Push a small test image to verify write access.'
     required: false
     default: 'true'
+  image_registry:
+    description: >
+      Registry the service image and the test image come through, keeping
+      their paths (hello-world -> <registry>/library/hello-world). Default:
+      $OCTOPILOT_IMAGE_REGISTRY; unset, as written.
+    required: false
+    default: ''
 
 outputs:
   registry_url:
@@ -78,6 +85,8 @@ runs:
     - name: Wait for registry service container to be healthy
       id: wait
       shell: bash
+      env:
+        OCTOPILOT_IMAGE_REGISTRY: ${{ inputs.image_registry || env.OCTOPILOT_IMAGE_REGISTRY }}
       run: |
         REGISTRY_URL="localhost:${{ inputs.port }}"
         MAX="${{ inputs.max_attempts }}"
@@ -86,7 +95,8 @@ runs:
         # Find the registry service container by ID (GitHub starts it; match by published port or image)
         CONTAINER_ID=$(docker ps -q --no-trunc --filter "publish=${{ inputs.port }}" | head -1)
         if [ -z "$CONTAINER_ID" ]; then
-          CONTAINER_ID=$(docker ps -q --no-trunc --filter "ancestor=ghcr.io/octopilot/registry-tls:latest" | head -1)
+          SERVICE_IMAGE="$(bash "${{ github.action_path }}/../common/resolve-image.sh" ghcr.io/octopilot/registry-tls:latest)"
+          CONTAINER_ID=$(docker ps -q --no-trunc --filter "ancestor=${SERVICE_IMAGE}" | head -1)
         fi
 
         if [ -n "$CONTAINER_ID" ]; then
@@ -141,6 +151,8 @@ runs:
     - name: Test registry push/pull
       if: inputs.test_push == 'true'
       shell: bash
+      env:
+        OCTOPILOT_IMAGE_REGISTRY: ${{ inputs.image_registry || env.OCTOPILOT_IMAGE_REGISTRY }}
       run: |
         REGISTRY_URL="localhost:${{ inputs.port }}"
         TEST_IMAGE="${REGISTRY_URL}/octopilot-registry-health:ci"
@@ -148,8 +160,9 @@ runs:
         echo "🧪 Testing registry push/pull with ${TEST_IMAGE}..."
 
         # Use a minimal image that is likely already cached on the runner
-        docker pull hello-world:latest > /dev/null 2>&1 || true
-        docker tag hello-world:latest "${TEST_IMAGE}"
+        HELLO="$(bash "${{ github.action_path }}/../common/resolve-image.sh" hello-world:latest)"
+        docker pull "${HELLO}" > /dev/null 2>&1 || true
+        docker tag "${HELLO}" "${TEST_IMAGE}"
 
         if docker push "${TEST_IMAGE}" > /dev/null 2>&1; then
           echo "✅ Push test passed"
