@@ -64,8 +64,10 @@ def run(tmp_path: Path, builds: list[dict], **env: str) -> tuple[subprocess.Comp
 
 
 def builds(n: int) -> list[dict]:
-    return [{"imageName": f"ghcr.io/acme/svc-{i:02d}", "tag": f"reg.example/int/svc-{i:02d}:latest@sha256:{i:064x}"}
-            for i in range(n)]
+    return [
+        {"imageName": f"ghcr.io/acme/svc-{i:02d}", "tag": f"reg.example/int/svc-{i:02d}:latest@sha256:{i:064x}"}
+        for i in range(n)
+    ]
 
 
 def test_promotes_all_in_order(tmp_path: Path) -> None:
