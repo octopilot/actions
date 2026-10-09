@@ -611,7 +611,7 @@ jobs:
       (needs.integration-deploy.result == 'success' || needs.integration-deploy.result == 'skipped')
     runs-on: ${{ (startsWith(inputs.runner, '[') && fromJSON(inputs.runner)) || inputs.runner }}
     # Hard cap — a hung copy must fail the job, not burn 6h of runner time.
-    timeout-minutes: 30
+    timeout-minutes: 60
     # contents: write → create the GitHub Release; packages: write → push the
     # promoted images/chart to GHCR. Caller token must allow both (org default
     # read/write does; restricted callers set them on the caller job).
@@ -682,7 +682,6 @@ jobs:
           set -euo pipefail
           VERSION="${GITHUB_REF_NAME}"
           OWNER="${GITHUB_REPOSITORY_OWNER}"
-          : > promoted.tsv
           # Helm pushes a chart as <repo>/<chart name>:<version>; build_result may carry the image-style
           # <repo>:<version> for it, so normalise the source exactly as integration-deploy does.
           CHART_NAME=""
@@ -692,21 +691,40 @@ jobs:
           # the release target is always ghcr.io/<owner>/<basename>:<tag> —
           # same owner-relative convention as the build cache, so forks
           # release into their own namespace.
-          jq -r '.builds[] | "\(.imageName)\t\(.tag)"' build_result.json \
-          | while IFS="$(printf '\t')" read -r name src; do
-              base="$(basename "${name%%:*}")"
-              if [ -n "$CHART_NAME" ] && [[ "$base" == *-chart ]] && ! echo "$src" | grep -qE "/${CHART_NAME}:"; then
-                src="$(echo "$src" | sed "s|-chart:|-chart/${CHART_NAME}:|")"
-              fi
-              dst="ghcr.io/${OWNER}/${base}:${VERSION}"
-              if ! echo "$src" | grep -q '@sha256:'; then
-                echo "::warning::$name ref is not digest-pinned ($src) — copying by tag"
-              fi
+          # Copies run in parallel (PROMOTE_PARALLEL): each is a full blob transfer, and a suite of ~25
+          # images copied one by one outran the job timeout. A target already at the source digest is
+          # skipped, so re-running a cancelled release resumes instead of copying everything again.
+          PROMOTE_PARALLEL="${PROMOTE_PARALLEL:-6}"
+          PROMOTED_DIR="$(mktemp -d)"
+          export OWNER VERSION CHART_NAME PROMOTED_DIR
+          promote() {
+            local i="$1" name="$2" src="$3" base dst want have
+            base="$(basename "${name%%:*}")"
+            if [ -n "$CHART_NAME" ] && [[ "$base" == *-chart ]] && ! echo "$src" | grep -qE "/${CHART_NAME}:"; then
+              src="$(echo "$src" | sed "s|-chart:|-chart/${CHART_NAME}:|")"
+            fi
+            dst="ghcr.io/${OWNER}/${base}:${VERSION}"
+            want=""
+            if echo "$src" | grep -q '@sha256:'; then
+              want="${src##*@}"
+            else
+              echo "::warning::$name ref is not digest-pinned ($src) — copying by tag"
+            fi
+            have="$(crane digest "$dst" 2>/dev/null || true)"
+            if [ -n "$want" ] && [ "$have" = "$want" ]; then
+              echo "promote: $dst already at $want (skipped)"
+            else
               echo "promote: $src -> $dst"
               crane cp "$src" "$dst"
-              digest="$(crane digest "$dst")"
-              printf '%s\t%s@%s\n' "$name" "ghcr.io/${OWNER}/${base}:${VERSION}" "$digest" >> promoted.tsv
-            done
+              have="$(crane digest "$dst")"
+            fi
+            printf '%s\t%s@%s\n' "$name" "$dst" "$have" > "$PROMOTED_DIR/$(printf '%05d' "$i")"
+          }
+          export -f promote
+          jq -r '.builds | to_entries[] | "\(.key)\n\(.value.imageName)\n\(.value.tag)"' build_result.json \
+            | tr '\n' '\0' | xargs -0 -n 3 -P "$PROMOTE_PARALLEL" bash -euo pipefail -c 'promote "$@"' _
+          # Keep build_result order (file names are the zero-padded build index).
+          cat /dev/null "$PROMOTED_DIR"/* > promoted.tsv
           # Same contract as build_result.json, with released (ghcr) refs.
           jq -Rn '{builds: [inputs | split("\t") | {imageName: .[0], tag: .[1]}]}' \
             < promoted.tsv > release_result.json
