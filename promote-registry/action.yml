@@ -1,0 +1,84 @@
+name: 'Promote to registry'
+description: >
+  Copy the artifacts of a build_result.json from one private registry to another by digest (crane, registry to
+  registry, nothing rebuilt). Images take the given version tag, Helm charts keep their own; an existing target tag
+  at a different digest fails the promotion. Used by the pipeline's acceptance promotion.
+inputs:
+  build-result:
+    description: 'build_result.json whose builds are digest-pinned refs in source-registry.'
+    required: false
+    default: build_result.json
+  source-registry:
+    description: 'Registry the builds come from, e.g. us-docker.pkg.dev/<project>/integration.'
+    required: true
+  target-registry:
+    description: 'Registry to promote into, e.g. us-docker.pkg.dev/<project>/pp. Artifacts keep their path below it.'
+    required: true
+  version:
+    description: 'Tag for promoted images, e.g. the release tag v1.2.3.'
+    required: true
+  access-token:
+    description: >
+      OAuth access token for the registries (e.g. google-github-actions/auth token_format access_token). Empty:
+      ambient docker credentials.
+    required: false
+    default: ''
+  output:
+    description: 'Result file: build_result.json contract with the promoted refs, plus the version.'
+    required: false
+    default: promote_result.json
+  parallel:
+    description: 'Concurrent copies.'
+    required: false
+    default: '6'
+outputs:
+  path:
+    description: 'Path to the result file.'
+    value: ${{ inputs.output }}
+runs:
+  using: composite
+  steps:
+    - name: Install crane
+      shell: bash
+      run: |
+        set -euo pipefail
+        command -v crane >/dev/null 2>&1 && exit 0
+        case "$(uname -m)" in
+          x86_64) ARCH=x86_64 ;;
+          aarch64|arm64) ARCH=arm64 ;;
+          *) echo "::error::unsupported arch $(uname -m)"; exit 1 ;;
+        esac
+        mkdir -p "$HOME/.local/bin"
+        curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v0.20.3/go-containerregistry_Linux_${ARCH}.tar.gz" \
+          | tar -xz -C "$HOME/.local/bin" crane
+        echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+
+    - name: Promote
+      shell: bash
+      env:
+        BUILD_RESULT: ${{ inputs.build-result }}
+        SRC_REGISTRY: ${{ inputs.source-registry }}
+        DST_REGISTRY: ${{ inputs.target-registry }}
+        VERSION: ${{ inputs.version }}
+        OUTPUT: ${{ inputs.output }}
+        PROMOTE_PARALLEL: ${{ inputs.parallel }}
+        ACCESS_TOKEN: ${{ inputs.access-token }}
+      run: |
+        set -euo pipefail
+        if [ -n "$ACCESS_TOKEN" ]; then
+          # A job-private docker config: runner images often name a credential helper that cannot store.
+          export DOCKER_CONFIG="$RUNNER_TEMP/promote-registry-docker"
+          mkdir -p "$DOCKER_CONFIG"
+          echo '{}' > "$DOCKER_CONFIG/config.json"
+          for host in $(printf '%s\n%s\n' "${SRC_REGISTRY%%/*}" "${DST_REGISTRY%%/*}" | sort -u); do
+            echo "$ACCESS_TOKEN" | crane auth login "$host" -u oauth2accesstoken --password-stdin >/dev/null
+          done
+        fi
+        bash "$GITHUB_ACTION_PATH/promote.sh"
+        {
+          echo "### Promoted \`${VERSION}\` to \`${DST_REGISTRY}\`"
+          echo
+          echo '| artifact | promoted ref |'
+          echo '|---|---|'
+          jq -r '.builds[] | "| \(.imageName) | `\(.tag)` |"' "$OUTPUT"
+        } >> "$GITHUB_STEP_SUMMARY"

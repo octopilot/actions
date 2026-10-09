@@ -120,6 +120,36 @@ on:
           The runner must be able to pull from it (e.g. a docker credential helper).
         type: string
         default: ''
+      release_to_ghcr:
+        description: >
+          Tag runs: copy the tested artifacts to ghcr.io/<owner>/* and attach release_result.json to the GitHub
+          Release. Set false for products whose images stay in their own cloud registry (no egress); the GitHub
+          Release is still created.
+        type: boolean
+        default: true
+      acceptance_environment:
+        description: >
+          Tag runs: GitHub environment of the acceptance stage (e.g. pp). Empty (default): no acceptance stage. When
+          set, the run's tested artifacts are copied by digest from integration_registry to acceptance_registry under
+          the release tag, in a job bound to this environment (its WIF subject is
+          repo:<owner>/<repo>:environment:<name>), serialised per repository and environment. The tagged commit
+          must be on the default branch. Needs integration_registry and gcp-wif inputs.
+        type: string
+        default: ''
+      acceptance_registry:
+        description: 'Acceptance registry, e.g. us-docker.pkg.dev/<project>/pp. Artifacts keep their path below it.'
+        type: string
+        default: ''
+      acceptance_service_account:
+        description: >
+          Service account the acceptance job assumes through gcp_workload_identity_provider: reader on
+          integration_registry, writer on acceptance_registry, and only assumable from the acceptance environment.
+        type: string
+        default: ''
+      acceptance_runner:
+        description: 'Runner for the acceptance stage (label string or JSON array). Empty: runner.'
+        type: string
+        default: ''
     secrets:
       # Declared (not just inherited) so the secrets context is reliably wired
       # into this workflow across repos/orgs. Callers pass `secrets: inherit`.
@@ -652,12 +682,12 @@ jobs:
           output-path: build_result.json
 
       - name: Login to GHCR
-        if: needs.integration-artifacts.result == 'success' && (needs.integration-artifacts-wave1.result == 'success' || needs.integration-artifacts-wave1.result == 'skipped')
+        if: needs.integration-artifacts.result == 'success' && (needs.integration-artifacts-wave1.result == 'success' || needs.integration-artifacts-wave1.result == 'skipped') && inputs.release_to_ghcr
         shell: bash
         run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Install crane
-        if: needs.integration-artifacts.result == 'success' && (needs.integration-artifacts-wave1.result == 'success' || needs.integration-artifacts-wave1.result == 'skipped')
+        if: needs.integration-artifacts.result == 'success' && (needs.integration-artifacts-wave1.result == 'success' || needs.integration-artifacts-wave1.result == 'skipped') && inputs.release_to_ghcr
         shell: bash
         run: |
           set -euo pipefail
@@ -676,7 +706,7 @@ jobs:
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
       - name: Promote tested artifacts to GHCR (digest-pinned)
-        if: needs.integration-artifacts.result == 'success' && (needs.integration-artifacts-wave1.result == 'success' || needs.integration-artifacts-wave1.result == 'skipped')
+        if: needs.integration-artifacts.result == 'success' && (needs.integration-artifacts-wave1.result == 'success' || needs.integration-artifacts-wave1.result == 'skipped') && inputs.release_to_ghcr
         shell: bash
         run: |
           set -euo pipefail
@@ -737,7 +767,7 @@ jobs:
           } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Upload release build result
-        if: needs.integration-artifacts.result == 'success' && (needs.integration-artifacts-wave1.result == 'success' || needs.integration-artifacts-wave1.result == 'skipped')
+        if: needs.integration-artifacts.result == 'success' && (needs.integration-artifacts-wave1.result == 'success' || needs.integration-artifacts-wave1.result == 'skipped') && inputs.release_to_ghcr
         uses: actions/upload-artifact@v7
         with:
           name: release-build-result
@@ -779,3 +809,100 @@ jobs:
           files: |
             release_result.json
             dist/**
+
+  # ── 7. Acceptance promotion (tag runs, opt in with acceptance_environment). ──
+  # The released build moves on to the acceptance environment as the exact digests this run built and tested:
+  # copied registry to registry inside the cloud, never rebuilt. The job is bound to the GitHub environment, so
+  # only it can assume the acceptance identity, and one promotion per repository and environment runs at a time.
+  acceptance-promote:
+    name: Promote (${{ inputs.acceptance_environment }})
+    needs: [detect, integration-artifacts, integration-artifacts-wave1, release]
+    if: >-
+      !cancelled() && startsWith(github.ref, 'refs/tags/') &&
+      inputs.acceptance_environment != '' &&
+      needs.release.result == 'success' &&
+      needs.integration-artifacts.result == 'success' &&
+      (needs.integration-artifacts-wave1.result == 'success' || needs.integration-artifacts-wave1.result == 'skipped')
+    runs-on: ${{ (startsWith(inputs.acceptance_runner || inputs.runner, '[') && fromJSON(inputs.acceptance_runner || inputs.runner)) || inputs.acceptance_runner || inputs.runner }}
+    environment:
+      name: ${{ inputs.acceptance_environment }}
+    concurrency:
+      group: octopilot-acceptance-${{ github.repository }}-${{ inputs.acceptance_environment }}
+      cancel-in-progress: false
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      actions: read
+      id-token: write
+    steps:
+      - name: Acceptance inputs
+        shell: bash
+        env:
+          INTEGRATION_REGISTRY: ${{ inputs.integration_registry }}
+          ACCEPTANCE_REGISTRY: ${{ inputs.acceptance_registry }}
+          PROVIDER: ${{ inputs.gcp_workload_identity_provider }}
+          SERVICE_ACCOUNT: ${{ inputs.acceptance_service_account }}
+        run: |
+          set -euo pipefail
+          missing=""
+          [ -n "$INTEGRATION_REGISTRY" ] || missing="$missing integration_registry"
+          [ -n "$ACCEPTANCE_REGISTRY" ] || missing="$missing acceptance_registry"
+          [ -n "$PROVIDER" ] || missing="$missing gcp_workload_identity_provider"
+          [ -n "$SERVICE_ACCOUNT" ] || missing="$missing acceptance_service_account"
+          if [ -n "$missing" ]; then
+            echo "::error::acceptance_environment is set but these inputs are empty:$missing"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Tagged commit is on the default branch
+        shell: bash
+        env:
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        run: |
+          set -euo pipefail
+          branch="${DEFAULT_BRANCH:-main}"
+          git fetch -q origin "refs/heads/${branch}:refs/remotes/origin/${branch}"
+          if ! git merge-base --is-ancestor "$GITHUB_SHA" "origin/${branch}"; then
+            echo "::error::${GITHUB_REF_NAME} (${GITHUB_SHA}) is not on ${branch}; only releases cut from ${branch} are promoted"
+            exit 1
+          fi
+
+      - name: Download integration artifact outputs
+        uses: actions/download-artifact@v8
+        with:
+          pattern: integration-*
+          path: artifact-outputs
+
+      - name: Merge build_result.json
+        uses: octopilot/actions/merge-build-results@main
+        with:
+          directory: artifact-outputs
+          output-path: build_result.json
+
+      - name: Authenticate (acceptance identity)
+        id: auth
+        uses: google-github-actions/auth@v2
+        with:
+          workload_identity_provider: ${{ inputs.gcp_workload_identity_provider }}
+          service_account: ${{ inputs.acceptance_service_account }}
+          token_format: access_token
+
+      - name: Promote to the acceptance registry
+        uses: octopilot/actions/promote-registry@main
+        with:
+          build-result: build_result.json
+          source-registry: ${{ inputs.integration_registry }}
+          target-registry: ${{ inputs.acceptance_registry }}
+          version: ${{ github.ref_name }}
+          access-token: ${{ steps.auth.outputs.access_token }}
+          output: acceptance_result.json
+
+      - uses: actions/upload-artifact@v7
+        with:
+          name: acceptance-result-${{ inputs.acceptance_environment }}
+          path: acceptance_result.json
+          retention-days: 90
