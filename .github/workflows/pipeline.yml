@@ -150,6 +150,13 @@ on:
         description: 'Runner for the acceptance stage (label string or JSON array). Empty: runner.'
         type: string
         default: ''
+      acceptance_hold:
+        description: >
+          Tag runs: image basenames (space or newline separated) left out of the acceptance promotion, e.g. workloads
+          whose release is opt-in. They are built and tested as usual but get no <version> tag in acceptance_registry,
+          so image automation there keeps them on their last promoted tag. Empty (default): promote everything.
+        type: string
+        default: ''
     secrets:
       # Declared (not just inherited) so the secrets context is reliably wired
       # into this workflow across repos/orgs. Callers pass `secrets: inherit`.
@@ -882,6 +889,25 @@ jobs:
         with:
           directory: artifact-outputs
           output-path: build_result.json
+
+      - name: Hold opt-in images back
+        if: inputs.acceptance_hold != ''
+        shell: bash
+        env:
+          HOLD: ${{ inputs.acceptance_hold }}
+        run: |
+          set -euo pipefail
+          hold="$(printf '%s\n' $HOLD | jq -R . | jq -s .)"
+          jq --argjson hold "$hold" \
+            '.builds |= map(select(((.imageName | split(":")[0] | split("/") | last) as $b | $hold | index($b)) | not))' \
+            build_result.json > build_result.held.json
+          {
+            echo "### Held back from ${{ inputs.acceptance_environment }} (\`${GITHUB_REF_NAME}\`)"
+            echo
+            jq -r --argjson hold "$hold" '.builds[] | (.imageName | split(":")[0] | split("/") | last) as $b | select($hold | index($b)) | "- \($b)"' build_result.json
+          } >> "$GITHUB_STEP_SUMMARY"
+          echo "acceptance: holding $(jq '.builds | length' build_result.json) -> $(jq '.builds | length' build_result.held.json) images"
+          mv build_result.held.json build_result.json
 
       - name: Authenticate (acceptance identity)
         id: auth
