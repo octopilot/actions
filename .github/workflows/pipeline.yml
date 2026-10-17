@@ -157,6 +157,12 @@ on:
           so image automation there keeps them on their last promoted tag. Empty (default): promote everything.
         type: string
         default: ''
+      release_skip:
+        description: >
+          Tag runs: image basenames (space or newline separated) left out of the ghcr.io release, e.g. a suite build
+          (BP_RUST_BRRTROUTER) that is only the intermediate of its per-binary images. Empty: release everything.
+        type: string
+        default: ''
       keep_artifacts:
         description: >
           Before the run uploads anything (detect job): the repository's Actions artifacts are reduced to the newest
@@ -716,6 +722,20 @@ jobs:
         with:
           directory: artifact-outputs
           output-path: build_result.json
+
+      - name: Leave intermediates out of the release (release_skip)
+        if: inputs.release_skip != '' && needs.integration-artifacts.result == 'success' && (needs.integration-artifacts-wave1.result == 'success' || needs.integration-artifacts-wave1.result == 'skipped')
+        shell: bash
+        env:
+          SKIP: ${{ inputs.release_skip }}
+        run: |
+          set -euo pipefail
+          skip="$(printf '%s\n' $SKIP | jq -R . | jq -s .)"
+          jq --argjson skip "$skip" \
+            '.builds |= map(select(((.imageName | split(":")[0] | split("/") | last) as $b | $skip | index($b)) | not))' \
+            build_result.json > build_result.skip.json
+          echo "release: leaving out $(jq -r 'join(", ")' <<<"$skip"); $(jq '.builds | length' build_result.json) -> $(jq '.builds | length' build_result.skip.json) artifacts"
+          mv build_result.skip.json build_result.json
 
       - name: Login to GHCR
         if: needs.integration-artifacts.result == 'success' && (needs.integration-artifacts-wave1.result == 'success' || needs.integration-artifacts-wave1.result == 'skipped') && inputs.release_to_ghcr
