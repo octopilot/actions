@@ -157,6 +157,22 @@ on:
           so image automation there keeps them on their last promoted tag. Empty (default): promote everything.
         type: string
         default: ''
+      keep_artifacts:
+        description: >
+          Before the run uploads anything (detect job): the repository's Actions artifacts are reduced to the newest
+          N of each name. Artifact storage is one quota per organisation and a full one fails every upload in every
+          repository. Artifacts of this run and of runs still going are kept. Needs `actions: write` from the caller;
+          without it the trim warns and the run goes ahead. 0: off.
+        type: number
+        default: 3
+      keep_images:
+        description: >
+          Before each push to a release registry (acceptance_registry, and ghcr.io when release_to_ghcr): each
+          image's and chart's versions there are reduced to N, counting the one being pushed, newest vX.Y.Z first.
+          Artifact Registry needs artifactregistry.versions.delete (roles/artifactregistry.repoAdmin) for the
+          acceptance identity; ghcr.io needs the repository to hold Admin on the package. 0 (default): off.
+        type: number
+        default: 0
     secrets:
       # Declared (not just inherited) so the secrets context is reliably wired
       # into this workflow across repos/orgs. Callers pass `secrets: inherit`.
@@ -191,6 +207,12 @@ jobs:
       pipeline-context: ${{ steps.detect.outputs.pipeline-context }}
     steps:
       - uses: actions/checkout@v7
+      # First thing the pipeline does, so its own uploads have room (keep_artifacts).
+      - name: Trim artifacts
+        if: inputs.keep_artifacts > 0
+        uses: octopilot/actions/trim-artifacts@main
+        with:
+          keep: ${{ inputs.keep_artifacts }}
       - name: Detect Contexts
         id: detect
         uses: octopilot/actions/detect-contexts@main
@@ -712,6 +734,14 @@ jobs:
             | tar -xz -C "$HOME/.local/bin" crane
           echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
+      - name: Trim GHCR (keep_images)
+        if: needs.integration-artifacts.result == 'success' && (needs.integration-artifacts-wave1.result == 'success' || needs.integration-artifacts-wave1.result == 'skipped') && inputs.release_to_ghcr && inputs.keep_images > 0
+        uses: octopilot/actions/trim-registry@main
+        with:
+          build-result: build_result.json
+          target-registry: ghcr.io/${{ github.repository_owner }}
+          keep: ${{ inputs.keep_images }}
+
       - name: Promote tested artifacts to GHCR (digest-pinned)
         if: needs.integration-artifacts.result == 'success' && (needs.integration-artifacts-wave1.result == 'success' || needs.integration-artifacts-wave1.result == 'skipped') && inputs.release_to_ghcr
         shell: bash
@@ -916,6 +946,16 @@ jobs:
           workload_identity_provider: ${{ inputs.gcp_workload_identity_provider }}
           service_account: ${{ inputs.acceptance_service_account }}
           token_format: access_token
+
+      - name: Trim the acceptance registry (keep_images)
+        if: inputs.keep_images > 0
+        uses: octopilot/actions/trim-registry@main
+        with:
+          build-result: build_result.json
+          source-registry: ${{ inputs.integration_registry }}
+          target-registry: ${{ inputs.acceptance_registry }}
+          keep: ${{ inputs.keep_images }}
+          access-token: ${{ steps.auth.outputs.access_token }}
 
       - name: Promote to the acceptance registry
         uses: octopilot/actions/promote-registry@main

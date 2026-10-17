@@ -1,0 +1,23 @@
+name: 'Trim artifacts'
+description: >
+  Reduce the repository's GitHub Actions artifacts to the newest `keep` of each name, before the run uploads its own.
+  Artifact storage is one quota per organisation; when it is full every upload in every repository fails. Artifacts
+  of this run and of runs still in progress are never deleted. Needs `actions: write` on the job; a failure warns.
+inputs:
+  keep:
+    description: 'Artifacts left per name. 0 turns trimming off.'
+    required: false
+    default: '3'
+  token:
+    description: 'Token with actions: write on this repository.'
+    required: false
+    default: ${{ github.token }}
+runs:
+  using: composite
+  steps:
+    - name: Trim artifacts
+      shell: bash
+      env:
+        KEEP: ${{ inputs.keep }}
+        GITHUB_TOKEN: ${{ inputs.token }}
+      run: bash "$GITHUB_ACTION_PATH/trim.sh"

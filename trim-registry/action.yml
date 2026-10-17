@@ -1,0 +1,43 @@
+name: 'Trim registry'
+description: >
+  Before a push, reduce each artifact's versions in the target registry to `keep`, counting the version about to be
+  pushed: Artifact Registry (<loc>-docker.pkg.dev/<project>/<repository>) or ghcr.io/<owner>. Versions rank by their
+  highest vX.Y.Z tag, then update time; untagged ones go first. The digest being pushed is never deleted, and a
+  listing or delete failure warns without failing the push.
+inputs:
+  build-result:
+    description: 'build_result.json about to be pushed (digest-pinned refs under source-registry).'
+    required: false
+    default: build_result.json
+  source-registry:
+    description: 'Registry the build refs are under; an artifact keeps its path below it in the target. Empty for ghcr.io targets.'
+    required: false
+    default: ''
+  target-registry:
+    description: 'Registry being pushed to.'
+    required: true
+  keep:
+    description: 'Versions left per artifact after the push. 0 turns trimming off.'
+    required: false
+    default: '0'
+  access-token:
+    description: 'Artifact Registry: OAuth token of an identity allowed artifactregistry.versions.delete (roles/artifactregistry.repoAdmin).'
+    required: false
+    default: ''
+  github-token:
+    description: 'ghcr.io: token with packages: write; the repository needs the Admin role on each package.'
+    required: false
+    default: ${{ github.token }}
+runs:
+  using: composite
+  steps:
+    - name: Trim registry
+      shell: bash
+      env:
+        BUILD_RESULT: ${{ inputs.build-result }}
+        SRC_REGISTRY: ${{ inputs.source-registry }}
+        DST_REGISTRY: ${{ inputs.target-registry }}
+        KEEP: ${{ inputs.keep }}
+        ACCESS_TOKEN: ${{ inputs.access-token }}
+        GITHUB_TOKEN: ${{ inputs.github-token }}
+      run: bash "$GITHUB_ACTION_PATH/trim.sh"
