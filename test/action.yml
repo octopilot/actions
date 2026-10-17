@@ -399,3 +399,4 @@ runs:
         name: coverage-${{ steps.ctx.outputs.name_slug }}
         path: coverage
         if-no-files-found: ignore
+        retention-days: 7       # GitHub's default is 90; the org's artifact quota is shared

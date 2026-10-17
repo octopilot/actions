@@ -165,6 +165,12 @@ on:
           without it the trim warns and the run goes ahead. 0: off.
         type: number
         default: 3
+      artifact_max_age_days:
+        description: >
+          With keep_artifacts: also delete the repository's artifacts older than this many days, however few of their
+          name there are, so an artifact nothing rebuilds still expires. 0: no age limit.
+        type: number
+        default: 7
       keep_images:
         description: >
           Before each push to a release registry (acceptance_registry, and ghcr.io when release_to_ghcr): each
@@ -213,6 +219,7 @@ jobs:
         uses: octopilot/actions/trim-artifacts@main
         with:
           keep: ${{ inputs.keep_artifacts }}
+          max-age-days: ${{ inputs.artifact_max_age_days }}
       - name: Detect Contexts
         id: detect
         uses: octopilot/actions/detect-contexts@main

@@ -16,6 +16,10 @@ inputs:
     description: 'owner/repo to trim. Default: this one.'
     required: false
     default: ${{ github.repository }}
+  max-age-days:
+    description: 'Also delete any artifact older than this many days, however few of its name there are. 0: no age limit.'
+    required: false
+    default: '0'
   clear:
     description: "'true': keep 0 deletes every artifact (a one-off clear-down) instead of turning trimming off."
     required: false
@@ -33,6 +37,7 @@ runs:
         KEEP: ${{ inputs.keep }}
         GITHUB_TOKEN: ${{ inputs.token }}
         TRIM_REPOSITORY: ${{ inputs.repository }}
+        MAX_AGE_DAYS: ${{ inputs.max-age-days }}
         CLEAR: ${{ inputs.clear == 'true' && '1' || '' }}
         DRY_RUN: ${{ inputs.dry-run == 'true' && '1' || '' }}
       run: bash "$GITHUB_ACTION_PATH/trim.sh"
