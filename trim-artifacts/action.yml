@@ -9,9 +9,21 @@ inputs:
     required: false
     default: '3'
   token:
-    description: 'Token with actions: write on this repository.'
+    description: 'Token with actions: write on the repository (another repository needs a token that reaches it).'
     required: false
     default: ${{ github.token }}
+  repository:
+    description: 'owner/repo to trim. Default: this one.'
+    required: false
+    default: ${{ github.repository }}
+  clear:
+    description: "'true': keep 0 deletes every artifact (a one-off clear-down) instead of turning trimming off."
+    required: false
+    default: 'false'
+  dry-run:
+    description: "'true': list what would be deleted, delete nothing."
+    required: false
+    default: 'false'
 runs:
   using: composite
   steps:
@@ -20,4 +32,7 @@ runs:
       env:
         KEEP: ${{ inputs.keep }}
         GITHUB_TOKEN: ${{ inputs.token }}
+        GITHUB_REPOSITORY: ${{ inputs.repository }}
+        CLEAR: ${{ inputs.clear == 'true' && '1' || '' }}
+        DRY_RUN: ${{ inputs.dry-run == 'true' && '1' || '' }}
       run: bash "$GITHUB_ACTION_PATH/trim.sh"
