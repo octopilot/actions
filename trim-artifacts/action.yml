@@ -32,7 +32,7 @@ runs:
       env:
         KEEP: ${{ inputs.keep }}
         GITHUB_TOKEN: ${{ inputs.token }}
-        GITHUB_REPOSITORY: ${{ inputs.repository }}
+        TRIM_REPOSITORY: ${{ inputs.repository }}
         CLEAR: ${{ inputs.clear == 'true' && '1' || '' }}
         DRY_RUN: ${{ inputs.dry-run == 'true' && '1' || '' }}
       run: bash "$GITHUB_ACTION_PATH/trim.sh"
