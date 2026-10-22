@@ -406,6 +406,8 @@ def build_matrix_include(artifacts: list[dict], repo_root: str) -> list[dict]:
                     # work (and never leak long synthesized commands into names).
                     "kind": "test",
                     "job_label": f"Test ({short}, {lang_label})",
+                    # the artifacts this leg tests (change detection keeps the leg if any of them changed)
+                    "artifacts": [image],
                 }
                 entry_by_key[key] = entry
                 matrix_include.append(entry)
@@ -429,6 +431,11 @@ def build_matrix_include(artifacts: list[dict], repo_root: str) -> list[dict]:
             # and BDD suites of one workspace run concurrently. BP_TEST_LABEL
             # names a leg in the DAG: "Test (bdd, rust)".
             declared_cmd = env.get("BP_TEST_COMMAND")
+            # An artifact that shares the leg's command (or declares none) is tested by the shared leg.
+            if (
+                not declared_cmd or declared_cmd == entry.get("command") or not entry.get("command")
+            ) and image not in entry["artifacts"]:
+                entry["artifacts"].append(image)
             if declared_cmd:
                 test_label = env.get("BP_TEST_LABEL", "").strip()
                 # BP_TEST_SOFT_FAIL=true: the leg runs and reports honestly,
@@ -459,6 +466,7 @@ def build_matrix_include(artifacts: list[dict], repo_root: str) -> list[dict]:
                             "version": entry["version"],
                             "kind": "test",
                             "command": declared_cmd,
+                            "artifacts": [image],
                             "job_label": f"Test ({test_label or short}{advisory}, {lang_label_now})",
                         }
                         if soft_fail:
@@ -846,6 +854,15 @@ def main() -> None:
 
     repo_root = os.path.dirname(os.path.abspath(skaffold_file))
     pipeline_context = build_pipeline_context(config, repo_root)
+    # Opt-in: keep only the legs whose artifacts the commit range touched (changes.py).
+    if os.environ.get("ONLY_CHANGED", "").lower() in ("true", "1", "yes"):
+        sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+        from changes import filter_context, write_summary
+
+        artifacts = (config.get("build") or {}).get("artifacts") or []
+        skaffold_rel = os.path.relpath(os.path.abspath(skaffold_file), repo_root)
+        pipeline_context = filter_context(pipeline_context, artifacts, repo_root, skaffold_rel, dict(os.environ))
+        write_summary(pipeline_context, os.environ.get("GITHUB_STEP_SUMMARY"))
     write_outputs(pipeline_context, os.environ.get("GITHUB_OUTPUT"))
 
 
