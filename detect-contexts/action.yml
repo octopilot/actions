@@ -5,6 +5,20 @@ inputs:
     description: 'Path to skaffold.yaml'
     required: false
     default: 'skaffold.yaml'
+  only-changed:
+    description: >
+      Keep only the legs whose skaffold artifacts the commit range touched (changes.py): a push compares the previous
+      head, a pull request its merge base, a tag the previous tag. Needs the history (checkout fetch-depth 0).
+    required: false
+    default: 'false'
+  build-all:
+    description: 'With only-changed: build every artifact anyway (e.g. after a builder or run-image bump).'
+    required: false
+    default: 'false'
+  always-rebuild-paths:
+    description: 'With only-changed: comma or newline separated globs whose change rebuilds every artifact.'
+    required: false
+    default: ''
 outputs:
   matrix:
     description: 'JSON string for GitHub Actions matrix strategy (include)'
@@ -50,4 +64,7 @@ runs:
       shell: bash
       env:
         SKAFFOLD_FILE: ${{ inputs.skaffold-file }}
+        ONLY_CHANGED: ${{ inputs.only-changed }}
+        BUILD_ALL: ${{ inputs.build-all }}
+        ALWAYS_REBUILD_PATHS: ${{ inputs.always-rebuild-paths }}
       run: python ${{ github.action_path }}/detect.py

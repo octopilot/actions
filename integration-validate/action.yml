@@ -65,8 +65,15 @@ runs:
           fi
         fi
         if [ -z "$CTX" ] || [ "$CTX" = "null" ]; then
-          echo "::error::No build context found in pipeline-context.matrix (index $INDEX, non-helm) and no docker artifact in integration_matrix"
-          exit 1
+          # Change detection can leave only chart legs (a helm/ change): nothing to compile, the UUID is still minted.
+          if echo "$PIPELINE_CONTEXT" | jq -e '[.integration_matrix[]? | select(.type == "image")] | length == 0' >/dev/null \
+             && echo "$PIPELINE_CONTEXT" | jq -e '[.integration_matrix[]? | select(.type == "chart")] | length > 0' >/dev/null; then
+            echo "Only chart artifacts in this run; no build to validate"
+            CTX='{"name":"charts-only","context":".","language":"none","version":"","kind":"build"}'
+          else
+            echo "::error::No build context found in pipeline-context.matrix (index $INDEX, non-helm) and no docker artifact in integration_matrix"
+            exit 1
+          fi
         fi
         echo "context=${CTX}" >> "$GITHUB_OUTPUT"
         echo "language=$(echo "$CTX" | jq -r '.language')" >> "$GITHUB_OUTPUT"

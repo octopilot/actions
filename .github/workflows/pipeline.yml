@@ -146,6 +146,23 @@ on:
           integration_registry, writer on acceptance_registry, and only assumable from the acceptance environment.
         type: string
         default: ''
+      only_changed:
+        description: >
+          Build only what the commit range touched: detect-contexts drops every test, integration and deliverable leg
+          whose skaffold artifact's inputs did not change (a Rust artifact's BP_RUST_PACKAGES and the workspace crates
+          they depend on, its share of Cargo.lock, skaffold buildpacks.dependencies.paths, its BP_SUITE_IMAGES map;
+          otherwise its context). A push compares the previous head, a pull request its merge base, a tag the previous
+          tag. The skaffold file and .github/workflows rebuild everything. Off by default.
+        type: boolean
+        default: false
+      build_all:
+        description: 'With only_changed: build every artifact anyway (a dispatch after a builder or run-image bump).'
+        type: boolean
+        default: false
+      always_rebuild_paths:
+        description: 'With only_changed: comma or newline separated globs whose change rebuilds every artifact.'
+        type: string
+        default: ''
       acceptance_runner:
         description: 'Runner for the acceptance stage (label string or JSON array). Empty: runner.'
         type: string
@@ -219,6 +236,9 @@ jobs:
       pipeline-context: ${{ steps.detect.outputs.pipeline-context }}
     steps:
       - uses: actions/checkout@v7
+        with:
+          # Change detection diffs the commit range (and finds the previous tag); otherwise one commit is enough.
+          fetch-depth: ${{ inputs.only_changed && 0 || 1 }}
       # First thing the pipeline does, so its own uploads have room (keep_artifacts).
       - name: Trim artifacts
         if: inputs.keep_artifacts > 0
@@ -229,6 +249,10 @@ jobs:
       - name: Detect Contexts
         id: detect
         uses: octopilot/actions/detect-contexts@main
+        with:
+          only-changed: ${{ inputs.only_changed }}
+          build-all: ${{ inputs.build_all }}
+          always-rebuild-paths: ${{ inputs.always_rebuild_paths }}
 
   # ── 2. Lint (pre-commit, language-aware) ───────────────────────────────────
   lint:
