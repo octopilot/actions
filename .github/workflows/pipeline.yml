@@ -171,13 +171,15 @@ on:
         description: >
           Tag runs: image basenames (space or newline separated) left out of the acceptance promotion, e.g. workloads
           whose release is opt-in. They are built and tested as usual but get no <version> tag in acceptance_registry,
-          so image automation there keeps them on their last promoted tag. Empty (default): promote everything.
+          so image automation there keeps them on their last promoted tag. A name also holds its variant images
+          (<name>-debug, <name>-release: BP_RUST_VARIANTS). Empty (default): promote everything.
         type: string
         default: ''
       release_skip:
         description: >
           Tag runs: image basenames (space or newline separated) left out of the ghcr.io release, e.g. a suite build
-          (BP_RUST_BRRTROUTER) that is only the intermediate of its per-binary images. Empty: release everything.
+          (BP_RUST_BRRTROUTER) that is only the intermediate of its per-binary images. A name also covers its variant
+          images (<name>-debug, <name>-release). Empty: release everything.
         type: string
         default: ''
       keep_artifacts:
@@ -756,7 +758,7 @@ jobs:
           set -euo pipefail
           skip="$(printf '%s\n' $SKIP | jq -R . | jq -s .)"
           jq --argjson skip "$skip" \
-            '.builds |= map(select(((.imageName | split(":")[0] | split("/") | last) as $b | $skip | index($b)) | not))' \
+            '.builds |= map(select(((.imageName | split(":")[0] | split("/") | last) as $b | ($skip | index($b)) or ($skip | index($b | sub("-(debug|release)$"; "")))) | not))' \
             build_result.json > build_result.skip.json
           echo "release: leaving out $(jq -r 'join(", ")' <<<"$skip"); $(jq '.builds | length' build_result.json) -> $(jq '.builds | length' build_result.skip.json) artifacts"
           mv build_result.skip.json build_result.json
@@ -980,12 +982,12 @@ jobs:
           set -euo pipefail
           hold="$(printf '%s\n' $HOLD | jq -R . | jq -s .)"
           jq --argjson hold "$hold" \
-            '.builds |= map(select(((.imageName | split(":")[0] | split("/") | last) as $b | $hold | index($b)) | not))' \
+            '.builds |= map(select(((.imageName | split(":")[0] | split("/") | last) as $b | ($hold | index($b)) or ($hold | index($b | sub("-(debug|release)$"; "")))) | not))' \
             build_result.json > build_result.held.json
           {
             echo "### Held back from ${{ inputs.acceptance_environment }} (\`${GITHUB_REF_NAME}\`)"
             echo
-            jq -r --argjson hold "$hold" '.builds[] | (.imageName | split(":")[0] | split("/") | last) as $b | select($hold | index($b)) | "- \($b)"' build_result.json
+            jq -r --argjson hold "$hold" '.builds[] | (.imageName | split(":")[0] | split("/") | last) as $b | select(($hold | index($b)) or ($hold | index($b | sub("-(debug|release)$"; "")))) | "- \($b)"' build_result.json
           } >> "$GITHUB_STEP_SUMMARY"
           echo "acceptance: holding $(jq '.builds | length' build_result.json) -> $(jq '.builds | length' build_result.held.json) images"
           mv build_result.held.json build_result.json
