@@ -169,3 +169,58 @@ class TestRun:
         format_instructions = call_args[0][1]
         assert "2.0.0" in format_instructions
         assert "Release v2.0.0" in format_instructions or "v2.0.0" in format_instructions
+
+
+class TestSelfHostedOpenAI:
+    """OPENAI_BASE_URL: an OpenAI-compatible server (vLLM) on the self-hosted runners' network, no key."""
+
+    @staticmethod
+    def _response(content: str) -> MagicMock:
+        import json
+
+        resp = MagicMock()
+        resp.read.return_value = json.dumps({"choices": [{"message": {"content": content}}]}).encode()
+        resp.__enter__.return_value = resp
+        return resp
+
+    def test_posts_to_the_base_url_without_a_key_and_drops_the_reasoning(
+        self, repo_root: Path, monkeypatch: pytest.MonkeyPatch
+    ) -> None:
+        import json
+
+        monkeypatch.setenv("OPENAI_BASE_URL", "http://192.168.1.104:8000/v1/")
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        with patch("common.notes.get_previous_tag", return_value="v0.9.0"):
+            with patch("common.notes.get_commits_since", return_value=["fix: x"]):
+                with patch(
+                    "common.notes.urllib.request.urlopen",
+                    return_value=self._response("<think>\nplanning\n</think>\n\n# v1.0.0\n\nFixed x."),
+                ) as urlopen:
+                    body = run(repo_root, "1.0.0", provider="openai", model="Qwen/Qwen3.8-27B-FP8")
+        assert body == "# v1.0.0\n\nFixed x."
+        req = urlopen.call_args.args[0]
+        assert req.full_url == "http://192.168.1.104:8000/v1/chat/completions"
+        assert "Authorization" not in req.headers
+        payload = json.loads(req.data)
+        assert payload["model"] == "Qwen/Qwen3.8-27B-FP8"
+        assert payload["chat_template_kwargs"] == {"enable_thinking": False}
+
+    def test_openai_itself_still_needs_the_key(self, repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        monkeypatch.delenv("OPENAI_BASE_URL", raising=False)
+        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+        with patch("common.notes.get_previous_tag", return_value="v0.9.0"):
+            with patch("common.notes.get_commits_since", return_value=["fix: x"]):
+                with pytest.raises(ReleaseNotesError, match="OPENAI_API_KEY"):
+                    run(repo_root, "1.0.0", provider="openai")
+
+    def test_an_unreachable_server_names_the_url(self, repo_root: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+        import urllib.error
+
+        monkeypatch.setenv("OPENAI_BASE_URL", "http://192.168.1.104:8000/v1")
+        with patch("common.notes.get_previous_tag", return_value="v0.9.0"):
+            with patch("common.notes.get_commits_since", return_value=["fix: x"]):
+                with patch(
+                    "common.notes.urllib.request.urlopen", side_effect=urllib.error.URLError("Connection refused")
+                ):
+                    with pytest.raises(ReleaseNotesError, match=r"192\.168\.1\.104:8000"):
+                        run(repo_root, "1.0.0", provider="openai")

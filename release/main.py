@@ -5,7 +5,7 @@ import os
 import sys
 from pathlib import Path
 
-from common.notes import ReleaseNotesError
+from common.notes import ReleaseNotesError, plain_notes
 from common.notes import run as run_notes
 
 
@@ -64,8 +64,11 @@ def main() -> None:
             provider=provider,
         )
     except ReleaseNotesError as e:
-        print(str(e), file=sys.stderr)
-        sys.exit(1)
+        # Notes are a courtesy: a provider that is down, unreachable or out of credit must not fail the release.
+        print(f"::warning::release notes: {e}; using the commit list instead", file=sys.stderr)
+        body = plain_notes(project_root, version, since_tag)
+        output_path.parent.mkdir(parents=True, exist_ok=True)
+        output_path.write_text(body, encoding="utf-8")
 
     github_output = os.environ.get("GITHUB_OUTPUT")
     if github_output:

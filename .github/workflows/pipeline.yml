@@ -175,6 +175,21 @@ on:
           (<name>-debug, <name>-release: BP_RUST_VARIANTS). Empty (default): promote everything.
         type: string
         default: ''
+      release_notes_provider:
+        description: >
+          Tag runs: who writes the GitHub Release notes. anthropic (needs the ANTHROPIC_API_KEY secret) or openai, which
+          is any OpenAI-compatible server: with release_notes_base_url, a self-hosted one (vLLM) reachable from
+          `runner`, no key. If generation fails, GitHub's generated notes are used and the release goes ahead.
+        type: string
+        default: anthropic
+      release_notes_base_url:
+        description: "openai provider: the server's /v1 URL, e.g. http://192.168.1.104:8000/v1. Empty: api.openai.com."
+        type: string
+        default: ''
+      release_notes_model:
+        description: "Model for the release notes (e.g. Qwen/Qwen3.8-27B-FP8). Empty: the provider's default."
+        type: string
+        default: ''
       release_skip:
         description: >
           Tag runs: image basenames (space or newline separated) left out of the ghcr.io release, e.g. a suite build
@@ -879,23 +894,29 @@ jobs:
         with:
           fallback: "v0.0.0"
 
+      # Notes are a courtesy: a provider that is down or out of credit must not fail the release (24 Oct 2026, the
+      # Anthropic key's balance ran out), so a failure falls back to GitHub's generated notes.
       - name: Generate release notes (AI)
         id: release_notes
-        if: env.ANTHROPIC_API_KEY != ''
+        if: (inputs.release_notes_provider == 'anthropic' && env.ANTHROPIC_API_KEY != '') || (inputs.release_notes_provider == 'openai' && inputs.release_notes_base_url != '')
+        continue-on-error: true
         uses: octopilot/actions/release@main
+        env:
+          OPENAI_BASE_URL: ${{ inputs.release_notes_base_url }}
         with:
           image_registry: ${{ inputs.image_registry }}
           version: ${{ github.ref_name }}
           since_tag: ${{ steps.prev_tag.outputs.tag }}
-          provider: anthropic
+          provider: ${{ inputs.release_notes_provider }}
+          model: ${{ inputs.release_notes_model }}
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          # AI notes when the key is present; GitHub's generated notes otherwise.
+          # AI notes when they were written; GitHub's generated notes otherwise.
           body_path: ${{ steps.release_notes.outputs.body_file || '' }}
-          generate_release_notes: ${{ env.ANTHROPIC_API_KEY == '' }}
+          generate_release_notes: ${{ steps.release_notes.outputs.body_file == '' }}
           files: |
             release_result.json
             dist/**

@@ -1,4 +1,8 @@
-"""Generate release notes from commits since last tag using OpenAI or Anthropic. For GitHub Release body."""
+"""Generate release notes from commits since last tag using OpenAI or Anthropic. For GitHub Release body.
+
+The openai provider talks to any OpenAI-compatible endpoint: OPENAI_BASE_URL (default https://api.openai.com/v1) points
+it at a self-hosted server such as vLLM, which needs no OPENAI_API_KEY. A reasoning model's <think> block is dropped.
+"""
 
 from __future__ import annotations
 
@@ -96,10 +100,24 @@ def load_template(path: Path | None) -> str:
     return DEFAULT_TEMPLATE
 
 
+OPENAI_BASE_URL = "https://api.openai.com/v1"
+
+
+def _openai_base_url() -> str:
+    return (os.environ.get("OPENAI_BASE_URL") or OPENAI_BASE_URL).strip().rstrip("/")
+
+
+def _strip_reasoning(content: str) -> str:
+    """Drop a reasoning model's <think>...</think> block (Qwen3 and the like) ahead of the answer."""
+    return re.sub(r"^\s*<think>.*?</think>\s*", "", content, flags=re.S)
+
+
 def _call_openai(commits: list[str], format_instructions: str, version: str, model: str) -> str:
-    """Call OpenAI chat completions. Returns the generated markdown."""
+    """Call OpenAI-compatible chat completions (OpenAI, or a self-hosted server: OPENAI_BASE_URL). Returns markdown."""
+    base_url = _openai_base_url()
+    self_hosted = base_url != OPENAI_BASE_URL
     key = os.environ.get("OPENAI_API_KEY", "").strip()
-    if not key:
+    if not key and not self_hosted:
         raise ReleaseNotesError("OPENAI_API_KEY is not set. Add it as a repository secret for release notes.")
 
     user_content = (
@@ -124,28 +142,32 @@ def _call_openai(commits: list[str], format_instructions: str, version: str, mod
         ],
         "temperature": 0.3,
     }
+    if self_hosted:
+        # vLLM: answer without a thinking phase (Qwen3 chat template); release notes need none.
+        payload["chat_template_kwargs"] = {"enable_thinking": False}
+        payload["max_tokens"] = 2048
 
+    headers = {"Content-Type": "application/json"}
+    if key:
+        headers["Authorization"] = f"Bearer {key}"
     req = urllib.request.Request(
-        "https://api.openai.com/v1/chat/completions",
+        f"{base_url}/chat/completions",
         data=json.dumps(payload).encode(),
-        headers={
-            "Content-Type": "application/json",
-            "Authorization": f"Bearer {key}",
-        },
+        headers=headers,
         method="POST",
     )
 
     ctx = ssl.create_default_context(cafile=certifi.where())
     try:
-        with urllib.request.urlopen(req, timeout=60, context=ctx) as resp:
+        with urllib.request.urlopen(req, timeout=180 if self_hosted else 60, context=ctx) as resp:
             data = json.loads(resp.read())
     except urllib.error.HTTPError as e:
         body = e.read().decode() if e.fp else ""
-        raise ReleaseNotesError(f"OpenAI API error {e.code}: {body}") from e
+        raise ReleaseNotesError(f"OpenAI API error {e.code} ({base_url}): {body}") from e
     except urllib.error.URLError as e:
-        raise ReleaseNotesError(f"OpenAI request failed: {e.reason}") from e
+        raise ReleaseNotesError(f"OpenAI request to {base_url} failed: {e.reason}") from e
 
-    content = (data.get("choices") or [{}])[0].get("message", {}).get("content") or ""
+    content = _strip_reasoning((data.get("choices") or [{}])[0].get("message", {}).get("content") or "")
     if content.startswith("```"):
         content = re.sub(r"^```(?:markdown)?\n?", "", content)
         content = re.sub(r"\n?```\s*$", "", content)
@@ -207,6 +229,22 @@ def _call_anthropic(commits: list[str], format_instructions: str, version: str, 
         content = re.sub(r"^```(?:markdown)?\n?", "", content)
         content = re.sub(r"\n?```\s*$", "", content)
     return content.strip()
+
+
+def plain_notes(project_root: Path, version: str, since_tag: str | None = None) -> str:
+    """Release notes without a model: the commit subjects since the previous tag. The fallback when the provider fails,
+    so a release never waits on an AI service."""
+    lines = [f"# Release {version}", ""]
+    ref = since_tag or get_previous_tag(project_root)
+    try:
+        commits = get_commits_since(project_root, ref) if ref else []
+    except ReleaseNotesError:
+        commits = []
+    if commits:
+        lines += ["## Changes", ""] + [f"- {c}" for c in commits]
+        if ref:
+            lines += ["", f"*Commits since {ref}.*"]
+    return "\n".join(lines)
 
 
 def run(

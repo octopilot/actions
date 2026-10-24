@@ -16,7 +16,7 @@ inputs:
     description: 'Inline template content. Ignored if template_path is set.'
     required: false
   provider:
-    description: 'AI provider: openai or anthropic'
+    description: 'AI provider: anthropic, or openai (any OpenAI-compatible server; OPENAI_BASE_URL selects a self-hosted one such as vLLM)'
     required: false
     default: 'anthropic'
   model:
@@ -63,5 +63,5 @@ runs:
         INPUT_OUTPUT_FILENAME: ${{ inputs.output_filename }}
         OCTOPILOT_IMAGE_REGISTRY: ${{ inputs.image_registry || env.OCTOPILOT_IMAGE_REGISTRY }}
         OCTOPILOT_ACTION_IMAGE_TAG: ${{ inputs.image_tag }}
-        OCTOPILOT_PASS_ENV: ANTHROPIC_API_KEY OPENAI_API_KEY ANTHROPIC_MODEL OPENAI_MODEL RELEASE_NOTES_PROVIDER
+        OCTOPILOT_PASS_ENV: ANTHROPIC_API_KEY OPENAI_API_KEY OPENAI_BASE_URL ANTHROPIC_MODEL OPENAI_MODEL RELEASE_NOTES_PROVIDER
       run: bash "${{ github.action_path }}/../common/run-action-image.sh" octopilot/actions/release
