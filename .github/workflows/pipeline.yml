@@ -175,6 +175,12 @@ on:
           (<name>-debug, <name>-release: BP_RUST_VARIANTS). Empty (default): promote everything.
         type: string
         default: ''
+      integration_timeout_minutes:
+        description: >
+          Time limit of each integration artifact build (the image build and push). Raise it for large suites, e.g. a
+          BP_RUST_VARIANTS suite whose -debug images are several GB in total.
+        type: number
+        default: 45
       release_notes_provider:
         description: >
           Tag runs: who writes the GitHub Release notes. anthropic (needs the ANTHROPIC_API_KEY secret) or openai, which
@@ -371,8 +377,9 @@ jobs:
       contents: read
       packages: write
       id-token: write
-    # Hard cap — a hung test must fail the job, not burn 6h of runner time.
-    timeout-minutes: 45
+    # Hard cap — a hung test must fail the job, not burn 6h of runner time. A suite with BP_RUST_VARIANTS publishes
+    # every binary twice (the -debug ones carry full debug info), which takes longer over a slow uplink.
+    timeout-minutes: ${{ inputs.integration_timeout_minutes }}
     strategy:
       fail-fast: false
       # 999 == effectively unlimited; max-parallel must be >= 1 so 0 maps up.
