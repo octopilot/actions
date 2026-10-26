@@ -75,6 +75,17 @@ inputs:
       unset, every image is pulled as written.
     required: false
     default: ''
+  propagation_timeout:
+    description: >
+      How long a pushed image may take to resolve from the registry (op --propagation-timeout, a Go duration). Missing
+      images and transient errors are retried until then; a refused credential (401/403) fails at once whatever this
+      is. Default: $OCTOPILOT_PROPAGATION_TIMEOUT, else 10m.
+    required: false
+    default: ''
+  fanout_parallel:
+    description: 'Suite fan-out (BP_RUST_BRRTROUTER): images slimmed and pushed at once. Default: $OCTOPILOT_FANOUT_PARALLEL, else 6.'
+    required: false
+    default: ''
 outputs:
   digest:
     description: 'Container image digest (e.g. sha256:...).'
@@ -105,6 +116,8 @@ runs:
         INPUT_FROM_BUILD_RESULT: ${{ inputs.from_build_result }}
         INPUT_RUN_IMAGE_OVERRIDE: ${{ inputs.run_image_override }}
         OCTOPILOT_IMAGE_REGISTRY: ${{ inputs.image_registry || env.OCTOPILOT_IMAGE_REGISTRY }}
+        OP_PROPAGATION_TIMEOUT: ${{ inputs.propagation_timeout || env.OCTOPILOT_PROPAGATION_TIMEOUT || '10m' }}
+        OP_FANOUT_PARALLEL: ${{ inputs.fanout_parallel || env.OCTOPILOT_FANOUT_PARALLEL || '6' }}
       run: |
         # The input / workflow value, else the runner's own mirror (OCTOPILOT_RUNNER_IMAGE_REGISTRY on self-hosted pods).
         OCTOPILOT_IMAGE_REGISTRY="${OCTOPILOT_IMAGE_REGISTRY:-${OCTOPILOT_RUNNER_IMAGE_REGISTRY:-}}"
@@ -134,8 +147,22 @@ runs:
           exit 1
         fi
 
+        # Refreshing Google credentials (integration-registry, gcp-wif): op prefers them for Google registries over the
+        # docker login, whose static token Google refuses after an hour.
+        GOOGLE_CREDENTIALS_CONTENT=""
+        if [ -n "${OCTOPILOT_GOOGLE_CREDENTIALS:-}" ] && [ -f "${OCTOPILOT_GOOGLE_CREDENTIALS}" ]; then
+          GOOGLE_CREDENTIALS_CONTENT="$(cat "${OCTOPILOT_GOOGLE_CREDENTIALS}")"
+          echo "[auth] refreshing Google credentials: present ($(jq -r '.type // "unknown"' "${OCTOPILOT_GOOGLE_CREDENTIALS}" 2>/dev/null || echo unparseable))"
+        fi
+        export GOOGLE_CREDENTIALS_CONTENT OP_PROPAGATION_TIMEOUT OP_FANOUT_PARALLEL
+        echo "op: propagation timeout ${OP_PROPAGATION_TIMEOUT}, suite fan-out ${OP_FANOUT_PARALLEL} at a time"
+
         if [ "${INPUT_BUILD_BYPASS}" == "true" ]; then
             echo "Bypassing container execution. Running op directly..."
+            if [ -n "${OCTOPILOT_GOOGLE_CREDENTIALS:-}" ] && [ -f "${OCTOPILOT_GOOGLE_CREDENTIALS}" ]; then
+              export GOOGLE_APPLICATION_CREDENTIALS="${OCTOPILOT_GOOGLE_CREDENTIALS}"
+            fi
+            unset GOOGLE_CREDENTIALS_CONTENT
             export DOCKER_METADATA_OUTPUT_VERSION="${VERSION}"
             export GITHUB_ACTIONS="true"
             export CI="true"
@@ -240,6 +267,9 @@ runs:
                 -e OP_IMAGE_REGISTRY="${OCTOPILOT_IMAGE_REGISTRY}" \
                 -e GITHUB_TOKEN="${GITHUB_TOKEN}" \
                 -e DOCKER_CONFIG_CONTENT="$DOCKER_CONFIG_CONTENT" \
+                -e GOOGLE_CREDENTIALS_CONTENT \
+                -e OP_PROPAGATION_TIMEOUT \
+                -e OP_FANOUT_PARALLEL \
                 --entrypoint /bin/sh \
                 "$IMAGE" \
                 -c 'if [ -n "$DOCKER_CONFIG_CONTENT" ]; then
@@ -251,6 +281,12 @@ runs:
                   fi && \
                   echo "[auth] in-container: user=$(id -u) DOCKER_CONFIG=$DOCKER_CONFIG config.json=$([ -f "$DOCKER_CONFIG/config.json" ] && echo visible || echo MISSING)" && \
                   unset DOCKER_CONFIG_CONTENT && \
+                  if [ -n "$GOOGLE_CREDENTIALS_CONTENT" ]; then
+                    (umask 077; mkdir -p /tmp/.gcp && printf "%s" "$GOOGLE_CREDENTIALS_CONTENT" > /tmp/.gcp/credentials.json)
+                    export GOOGLE_APPLICATION_CREDENTIALS=/tmp/.gcp/credentials.json
+                    echo "[auth] in-container: GOOGLE_APPLICATION_CREDENTIALS set (refreshing Workload Identity credentials)"
+                  fi && \
+                  unset GOOGLE_CREDENTIALS_CONTENT && \
                   git config --global --add safe.directory /workspace && \
                   if [ -n "$OP_TTL_UUID" ]; then
                     OP_REPO_ARG=""; OP_EXTRA="--ttl-uuid $OP_TTL_UUID --ttl-tag ${OP_TTL_TAG:-1h}"

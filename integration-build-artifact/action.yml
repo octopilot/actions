@@ -52,6 +52,14 @@ inputs:
       images), keeping their paths. Default: $OCTOPILOT_IMAGE_REGISTRY; unset, as written.
     required: false
     default: ''
+  propagation_timeout:
+    description: 'How long a pushed image may take to resolve from the registry (op --propagation-timeout). Empty: the octopilot action default (10m).'
+    required: false
+    default: ''
+  fanout_parallel:
+    description: 'Suite fan-out: images slimmed and pushed at once. Empty: the octopilot action default (6).'
+    required: false
+    default: ''
 runs:
   using: "composite"
   steps:
@@ -131,6 +139,8 @@ runs:
         cache_image: ${{ inputs.cache_image }}
         from_build_result: ${{ inputs.from_build_result }}
         run_image_override: ${{ steps.runimage.outputs.override }}
+        propagation_timeout: ${{ inputs.propagation_timeout }}
+        fanout_parallel: ${{ inputs.fanout_parallel }}
 
     - name: Build and push chart (Octopilot)
       id: chart_build
@@ -145,6 +155,7 @@ runs:
         op_version: ${{ inputs.op_version }}
         docker_host: ${{ inputs.docker_host }}
         image_registry: ${{ inputs.image_registry || env.OCTOPILOT_IMAGE_REGISTRY }}
+        propagation_timeout: ${{ inputs.propagation_timeout }}
 
     - name: Chart requires skaffold artifact
       if: steps.parse.outputs.type == 'chart' && steps.parse.outputs.image == ''

@@ -4,7 +4,10 @@ description: >
   registry and the default (op names the artifacts ttl.sh/<uuid>-<key>). With one: a private registry, the
   repository's artifacts under <registry>/<repository name, lower-case>; the release job promotes them from there
   by digest. auth gcp-wif exchanges the job's OIDC token (the caller grants id-token: write) for a short-lived
-  Artifact Registry token through Workload Identity Federation; no key is stored anywhere.
+  Artifact Registry token through Workload Identity Federation; no key is stored anywhere. The docker login holds a
+  1-hour access token; for jobs that push for longer (a suite fan-out after a long compile) op uses the refreshing
+  credential configuration this action also writes (OCTOPILOT_GOOGLE_CREDENTIALS), which re-exchanges the job's
+  OIDC token whenever its access token expires.
 
 inputs:
   registry:
@@ -28,6 +31,12 @@ outputs:
   registry:
     description: 'Registry to pass to integration-build-artifact; empty means ttl.sh.'
     value: ${{ steps.where.outputs.registry }}
+  credentials_file:
+    description: >
+      gcp-wif: a Workload Identity Federation credential configuration (external_account) in RUNNER_TEMP that mints
+      a fresh access token whenever the last one expires, for the whole job. Also exported to later steps as
+      OCTOPILOT_GOOGLE_CREDENTIALS, which the octopilot action hands to op (GOOGLE_APPLICATION_CREDENTIALS).
+    value: ${{ steps.refreshing.outputs.path }}
 
 runs:
   using: composite
@@ -81,3 +90,41 @@ runs:
         TOKEN: ${{ steps.gcp.outputs.access_token }}
         HOST: ${{ steps.where.outputs.host }}
       run: printf '%s' "$TOKEN" | docker login -u oauth2accesstoken --password-stdin "https://${HOST}"
+
+    # The docker login above is a static token: Google refuses it after access_token_lifetime (1 hour), and a suite
+    # build that compiles for 35 minutes and then pushes ~60 images got 401 on every request from the 60th minute.
+    # This is the same Workload Identity Federation exchange as an external_account credential configuration, which
+    # Google client libraries (op's keychain) refresh on their own: each access token is minted from a fresh GitHub
+    # OIDC token, fetched with the job's ACTIONS_ID_TOKEN_REQUEST_TOKEN (valid for the whole job). No key; the file
+    # is in RUNNER_TEMP, never in the checkout (the build context), and goes with the runner.
+    - name: Refreshing Google credentials (Workload Identity Federation)
+      id: refreshing
+      if: steps.gcp.outcome == 'success'
+      shell: bash
+      env:
+        WIP: ${{ inputs.workload_identity_provider }}
+        SA: ${{ inputs.service_account }}
+      run: |
+        set -euo pipefail
+        if [ -z "${ACTIONS_ID_TOKEN_REQUEST_URL:-}" ] || [ -z "${ACTIONS_ID_TOKEN_REQUEST_TOKEN:-}" ]; then
+          echo "::warning::no GitHub OIDC token endpoint (id-token: write); op falls back to the 1-hour docker login"
+          exit 0
+        fi
+        path="${RUNNER_TEMP}/octopilot-gcp-credentials-${GITHUB_JOB}-$$.json"
+        umask 077
+        sep='?'; case "$ACTIONS_ID_TOKEN_REQUEST_URL" in *\?*) sep='&' ;; esac
+        audience="$(jq -rn --arg a "https://iam.googleapis.com/${WIP}" '$a | @uri')"
+        jq -n \
+          --arg aud "//iam.googleapis.com/${WIP}" \
+          --arg url "${ACTIONS_ID_TOKEN_REQUEST_URL}${sep}audience=${audience}" \
+          --arg auth "Bearer ${ACTIONS_ID_TOKEN_REQUEST_TOKEN}" \
+          --arg imp "https://iamcredentials.googleapis.com/v1/projects/-/serviceAccounts/${SA}:generateAccessToken" \
+          '{type: "external_account", audience: $aud,
+            subject_token_type: "urn:ietf:params:oauth:token-type:jwt",
+            token_url: "https://sts.googleapis.com/v1/token",
+            service_account_impersonation_url: $imp,
+            credential_source: {url: $url, headers: {Authorization: $auth},
+                                format: {type: "json", subject_token_field_name: "value"}}}' > "$path"
+        echo "path=$path" >> "$GITHUB_OUTPUT"
+        echo "OCTOPILOT_GOOGLE_CREDENTIALS=$path" >> "$GITHUB_ENV"
+        echo "Refreshing Workload Identity credentials for op: $(basename "$path") (RUNNER_TEMP)"

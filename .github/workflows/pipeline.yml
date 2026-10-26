@@ -181,6 +181,18 @@ on:
           BP_RUST_VARIANTS suite whose -debug images are several GB in total.
         type: number
         default: 45
+      propagation_timeout:
+        description: >
+          How long each pushed integration image may take to resolve from the registry (a Go duration, e.g. 10m).
+          Missing images and transient registry errors are retried until then; refused credentials fail at once.
+        type: string
+        default: 10m
+      suite_fanout_parallel:
+        description: >
+          Suite builds (BP_RUST_BRRTROUTER): images slimmed and pushed at once by the fan-out. A BP_RUST_VARIANTS suite
+          publishes two images per service, ~60 for PriceWhisperer; one at a time that took ~40 minutes.
+        type: number
+        default: 6
       release_notes_provider:
         description: >
           Tag runs: who writes the GitHub Release notes. anthropic (needs the ANTHROPIC_API_KEY secret) or openai, which
@@ -450,6 +462,8 @@ jobs:
           op_version: ${{ inputs.op_version }}
           image_registry: ${{ inputs.image_registry }}
           cache_image: ${{ steps.cache.outputs.image || '' }}
+          propagation_timeout: ${{ inputs.propagation_timeout }}
+          fanout_parallel: ${{ inputs.suite_fanout_parallel }}
 
       # ONE contract per leg: build_result.json (imageName + digested tag).
       # The key=value <output_key>.txt sidecar was the deprecated ttl-sh-actions
@@ -495,6 +509,8 @@ jobs:
       gcp_workload_identity_provider: ${{ inputs.gcp_workload_identity_provider }}
       gcp_service_account: ${{ inputs.gcp_service_account }}
       integration_max_parallel: ${{ inputs.integration_max_parallel }}
+      propagation_timeout: ${{ inputs.propagation_timeout }}
+      suite_fanout_parallel: ${{ inputs.suite_fanout_parallel }}
       matrix: ${{ toJson(fromJson(needs.detect.outputs.pipeline-context).integration_matrix_wave1) }}
 
   # ── 4c. Integration deploy (generic; opt-in via inputs.integration) ─────────
