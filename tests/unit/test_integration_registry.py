@@ -164,7 +164,9 @@ def test_refreshing_credentials_are_an_external_account_outside_the_checkout(tmp
     assert cfg["token_url"] == "https://sts.googleapis.com/v1/token"
     assert cfg["service_account_impersonation_url"].endswith(f"/serviceAccounts/{SA}:generateAccessToken")
     src = cfg["credential_source"]
-    assert src["url"].startswith("https://token.actions.example/id?api-version=2.0&audience=https%3A%2F%2Fiam.googleapis.com%2F")
+    assert src["url"].startswith(
+        "https://token.actions.example/id?api-version=2.0&audience=https%3A%2F%2Fiam.googleapis.com%2F"
+    )
     assert src["headers"]["Authorization"] == "Bearer job-request-token"
     assert src["format"] == {"type": "json", "subject_token_field_name": "value"}
     assert "job-request-token" not in text, "the request token must not be printed"
@@ -188,7 +190,10 @@ def test_refreshing_credentials_follow_the_wif_login() -> None:
 def test_op_gets_the_refreshing_credentials_and_tunables() -> None:
     step = load(ROOT / "octopilot" / "action.yml")["runs"]["steps"][0]
     run, env = step["run"], step["env"]
-    assert env["OP_PROPAGATION_TIMEOUT"] == "${{ inputs.propagation_timeout || env.OCTOPILOT_PROPAGATION_TIMEOUT || '10m' }}"
+    assert (
+        env["OP_PROPAGATION_TIMEOUT"]
+        == "${{ inputs.propagation_timeout || env.OCTOPILOT_PROPAGATION_TIMEOUT || '10m' }}"
+    )
     assert env["OP_FANOUT_PARALLEL"] == "${{ inputs.fanout_parallel || env.OCTOPILOT_FANOUT_PARALLEL || '6' }}"
     # Passed by name (not on the docker command line, where ps would show it) and materialised in the container.
     for name in ("GOOGLE_CREDENTIALS_CONTENT", "OP_PROPAGATION_TIMEOUT", "OP_FANOUT_PARALLEL"):
@@ -202,14 +207,17 @@ def test_pipeline_passes_propagation_timeout_and_fanout_parallel() -> None:
     inputs = pipe[True]["workflow_call"]["inputs"]
     assert inputs["propagation_timeout"]["default"] == "10m"
     assert inputs["suite_fanout_parallel"]["default"] == 6
-    build = next(s for s in pipe["jobs"]["integration-artifacts"]["steps"] if s.get("name") == "Build and push artifact")
+    build = next(
+        s for s in pipe["jobs"]["integration-artifacts"]["steps"] if s.get("name") == "Build and push artifact"
+    )
     assert build["with"]["propagation_timeout"] == "${{ inputs.propagation_timeout }}"
     assert build["with"]["fanout_parallel"] == "${{ inputs.suite_fanout_parallel }}"
     wave = pipe["jobs"]["integration-artifacts-wave1"]["with"]
     assert wave["propagation_timeout"] == "${{ inputs.propagation_timeout }}"
     assert wave["suite_fanout_parallel"] == "${{ inputs.suite_fanout_parallel }}"
     wbuild = next(
-        s for s in load(WORKFLOWS / "integration-artifacts-wave.yml")["jobs"]["build"]["steps"]
+        s
+        for s in load(WORKFLOWS / "integration-artifacts-wave.yml")["jobs"]["build"]["steps"]
         if s.get("name") == "Build and push artifact"
     )
     assert wbuild["with"]["propagation_timeout"] == "${{ inputs.propagation_timeout }}"
