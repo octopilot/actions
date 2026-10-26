@@ -13,7 +13,7 @@ from pathlib import Path
 
 SCRIPT = Path(__file__).resolve().parents[2] / "trim-registry" / "trim.sh"
 
-FAKE_CURL = r'''#!/usr/bin/env python3
+FAKE_CURL = r"""#!/usr/bin/env python3
 import json, os, sys
 args = sys.argv[1:]
 url = next(a for a in args if a.startswith("http"))
@@ -40,7 +40,7 @@ if "/manifests/" in url:
         if kids is not None else {"mediaType": "application/vnd.oci.image.manifest.v1+json", "layers": []}
     print(json.dumps(body)); sys.exit(0)
 sys.stderr.write("unexpected " + url + "\n"); sys.exit(2)
-'''
+"""
 
 
 def version(vid: int, digest: str, tags: list[str], when: str) -> dict:
@@ -59,7 +59,9 @@ def run(tmp_path: Path, state: dict, keep: int, pushing: str, gar: bool = False)
     result = tmp_path / "build_result.json"
     src = "localhost:5000" if gar else "ghcr.io/o"
     dst = "europe-docker.pkg.dev/p/r" if gar else "ghcr.io/o"
-    result.write_text(json.dumps({"builds": [{"imageName": "provider:v0.1.6", "tag": f"{src}/provider:v0.1.6@{pushing}"}]}))
+    result.write_text(
+        json.dumps({"builds": [{"imageName": "provider:v0.1.6", "tag": f"{src}/provider:v0.1.6@{pushing}"}]})
+    )
     env = {
         "PATH": f"{bindir}:{os.environ['PATH']}",
         "FAKE_STATE": str(tmp_path / "state.json"),
