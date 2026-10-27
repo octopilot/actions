@@ -25,7 +25,8 @@ if "/token?" in url:
     print(json.dumps({"token": "t"})); sys.exit(0)
 if "artifactregistry.googleapis.com" in url and "/versions" in url:
     print(json.dumps({"versions": [
-        {"name": "projects/p/locations/europe/repositories/r/packages/x/versions/" + v["name"], "updateTime": v["updated_at"],
+        {"name": "projects/p/locations/europe/repositories/r/packages/x/versions/" + v["name"],
+         "updateTime": v["updated_at"],
          "relatedTags": [{"name": "projects/p/locations/europe/repositories/r/packages/x/tags/" + t}
                          for t in v["metadata"]["container"]["tags"]]}
         for v in state["versions"]]})); sys.exit(0)
