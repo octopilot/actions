@@ -58,6 +58,10 @@ on:
         description: Keep the pack build cache as a GHCR image. Same contract as pipeline.yml.
         type: boolean
         default: false
+      sccache:
+        description: Shared Rust compile cache for the buildpack builds (see pipeline.yml).
+        type: boolean
+        default: false
       suite_fanout_parallel:
         description: Suite fan-out images pushed at once. Same contract as pipeline.yml.
         type: number
@@ -178,6 +182,7 @@ jobs:
           op_version: ${{ inputs.op_version }}
           image_registry: ${{ inputs.image_registry }}
           cache_image: ${{ steps.cache.outputs.image || '' }}
+          sccache: ${{ inputs.sccache }}
           from_build_result: wave0-build_result.json
           propagation_timeout: ${{ inputs.propagation_timeout }}
           fanout_parallel: ${{ inputs.suite_fanout_parallel }}

@@ -60,6 +60,10 @@ inputs:
     description: 'Suite fan-out: images slimmed and pushed at once. Empty: the octopilot action default (6).'
     required: false
     default: ''
+  sccache:
+    description: "'true': buildpack compiles use the runner's shared sccache (octopilot action sccache input)."
+    required: false
+    default: 'false'
 runs:
   using: "composite"
   steps:
@@ -141,6 +145,7 @@ runs:
         run_image_override: ${{ steps.runimage.outputs.override }}
         propagation_timeout: ${{ inputs.propagation_timeout }}
         fanout_parallel: ${{ inputs.fanout_parallel }}
+        sccache: ${{ inputs.sccache }}
 
     - name: Build and push chart (Octopilot)
       id: chart_build

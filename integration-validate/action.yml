@@ -29,6 +29,10 @@ inputs:
       Requires smoke-binary-path.
     required: false
     default: ''
+  sccache:
+    description: "'true': the release build compiles through the runner's shared sccache (see the test action)."
+    required: false
+    default: 'false'
 
 outputs:
   uuid:
@@ -45,6 +49,7 @@ runs:
       env:
         PIPELINE_CONTEXT: ${{ inputs['pipeline-context'] }}
         INDEX: ${{ inputs['validate-context-index'] }}
+        INPUT_SCCACHE: ${{ inputs.sccache }}
       run: |
         # Get first non-helm, non-deliverable matrix item (or at INDEX) —
         # deliverable legs ride in the same matrix for dynamic DAG rendering
@@ -82,6 +87,14 @@ runs:
         # toolchain builds must run HERE, not at repo root.
         echo "workdir=$(echo "$CTX" | jq -r '.workdir // .context // "."')" >> "$GITHUB_OUTPUT"
         echo "ctx_context=$(echo "$CTX" | jq -r '.context // "."')" >> "$GITHUB_OUTPUT"
+        # Repo-independent target dir with a shared cache (sccache keys include it); see the test action.
+        if [ "${INPUT_SCCACHE}" = "true" ] && [ -n "${OCTOPILOT_SCCACHE_WEBDAV_ENDPOINT:-}" ]; then
+          echo "sccache=true" >> "$GITHUB_OUTPUT"
+          echo "target_dir=${RUNNER_TEMP}/cargo-target" >> "$GITHUB_OUTPUT"
+        else
+          echo "sccache=false" >> "$GITHUB_OUTPUT"
+          echo "target_dir=${GITHUB_WORKSPACE}/target" >> "$GITHUB_OUTPUT"
+        fi
 
     # ── Toolchain setup (same pattern as test action) ───────────────────────────
     - name: Setup Rust
@@ -114,12 +127,16 @@ runs:
         # what GitHub-hosted images preinstall.
         sudo apt-get update -qq && sudo apt-get install -y mold pkg-config libssl-dev
 
+    - name: Start sccache (shared compile cache)
+      if: steps.resolve.outputs.language == 'rust' && steps.resolve.outputs.sccache == 'true'
+      uses: octopilot/actions/sccache@main
+
     - name: Build release (Rust)
       if: steps.resolve.outputs.language == 'rust'
       shell: bash
       working-directory: ${{ steps.resolve.outputs.workdir }}
       env:
-        CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        CARGO_TARGET_DIR: ${{ steps.resolve.outputs.target_dir }}
         CARGO_BUILD_INCREMENTAL: true
         RUSTFLAGS: ${{ runner.os == 'Linux' && '-C link-arg=-fuse-ld=mold' || '' }}
       run: cargo build --release
@@ -133,8 +150,14 @@ runs:
       if: steps.resolve.outputs.language == 'rust'
       uses: octopilot/actions/collect-rust-binaries@main
       with:
-        target-dir: ${{ github.workspace }}/target
+        target-dir: ${{ steps.resolve.outputs.target_dir }}
         upload: per-binary
+
+    - name: sccache stats
+      if: always() && steps.resolve.outputs.language == 'rust' && steps.resolve.outputs.sccache == 'true'
+      uses: octopilot/actions/sccache@main
+      with:
+        mode: stats
 
     - name: Setup Go
       if: steps.resolve.outputs.language == 'go'

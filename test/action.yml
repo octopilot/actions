@@ -20,6 +20,12 @@ inputs:
       $OCTOPILOT_IMAGE_REGISTRY; unset, as written.
     required: false
     default: ''
+  sccache:
+    description: >
+      'true': Rust legs compile through the runner's shared sccache (octopilot/actions/sccache) instead of restoring
+      target/ with rust-cache; the target dir moves to a repo-independent path so cached crates match across repos.
+    required: false
+    default: 'false'
 
 runs:
   using: "composite"
@@ -32,8 +38,18 @@ runs:
       shell: bash
       env:
         PIPELINE_CONTEXT: ${{ inputs['pipeline-context'] }}
+        INPUT_SCCACHE: ${{ inputs.sccache }}
       run: |
         echo "language=$(echo "$PIPELINE_CONTEXT"  | jq -r '.language')"         >> "$GITHUB_OUTPUT"
+        # sccache keys include CARGO_TARGET_DIR (and the OUT_DIRs under it): a per-repo path would make every repo's
+        # entries unique. With a shared cache the target dir is the same path for every repo (runner temp).
+        if [ "$INPUT_SCCACHE" = "true" ] && [ -n "${OCTOPILOT_SCCACHE_WEBDAV_ENDPOINT:-}" ]; then
+          echo "sccache=true" >> "$GITHUB_OUTPUT"
+          echo "target_dir=${RUNNER_TEMP}/cargo-target" >> "$GITHUB_OUTPUT"
+        else
+          echo "sccache=false" >> "$GITHUB_OUTPUT"
+          echo "target_dir=${GITHUB_WORKSPACE}/target" >> "$GITHUB_OUTPUT"
+        fi
         echo "version=$(echo "$PIPELINE_CONTEXT"   | jq -r '.version  // ""')"   >> "$GITHUB_OUTPUT"
         # workdir: where the toolchain lives (a nested workspace, BP_RUST_WORKSPACE_DIR); the build context otherwise
         echo "context=$(echo "$PIPELINE_CONTEXT"   | jq -r '.workdir // .context // "."')"  >> "$GITHUB_OUTPUT"
@@ -117,7 +133,7 @@ runs:
     # its time here. rust-cache keeps third-party artefacts and drops the workspace's own crates, keys on the toolchain,
     # Cargo.lock and the leg, and saves even when tests fail, so a red run still warms the next one.
     - name: Cache compiled dependencies (Rust)
-      if: steps.ctx.outputs.language == 'rust'
+      if: steps.ctx.outputs.language == 'rust' && steps.ctx.outputs.sccache != 'true'
       uses: Swatinem/rust-cache@v2
       with:
         workspaces: ${{ steps.ctx.outputs.context }} -> ${{ steps.ctx.outputs.target_rel }}
@@ -141,6 +157,10 @@ runs:
         restore-keys: |
           ${{ runner.os }}-rust-${{ steps.ctx.outputs.version || 'stable' }}-cargo-deps-v3-
           ${{ runner.os }}-cargo-deps-v3-
+
+    - name: Start sccache (shared compile cache)
+      if: steps.ctx.outputs.language == 'rust' && steps.ctx.outputs.sccache == 'true'
+      uses: octopilot/actions/sccache@main
 
     - name: Setup Python
       if: steps.ctx.outputs.language == 'python'
@@ -230,7 +250,7 @@ runs:
       env:
         CUSTOM_CMD: ${{ steps.ctx.outputs.command }}
         # Use workspace target dir so the cached target/ is always reused (same path for any context).
-        CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        CARGO_TARGET_DIR: ${{ steps.ctx.outputs.target_dir }}
         # Incremental builds reuse cached artifacts (see https://medium.com/@premchandak_11/one-line-in-cargo-config-toml-made-my-rust-build-35-faster-6c91425a8f0a).
         CARGO_BUILD_INCREMENTAL: true
         # Faster linking on Linux when mold is installed (step above).
@@ -248,11 +268,17 @@ runs:
       if: steps.ctx.outputs.language == 'rust'
       shell: bash
       env:
-        CARGO_TARGET_DIR: ${{ github.workspace }}/target
+        CARGO_TARGET_DIR: ${{ steps.ctx.outputs.target_dir }}
         # Append: a test leg only compiles the crates its features touch —
         # it must not replace the fuller set in the shared cache tree.
         COLLECT_APPEND: "1"
       run: bash "${{ github.action_path }}/../collect-rust-binaries/collect.sh"
+
+    - name: sccache stats
+      if: always() && steps.ctx.outputs.language == 'rust' && steps.ctx.outputs.sccache == 'true'
+      uses: octopilot/actions/sccache@main
+      with:
+        mode: stats
 
     - name: Run Tests (Python) with coverage
       if: steps.ctx.outputs.language == 'python'

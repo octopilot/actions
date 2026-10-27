@@ -86,6 +86,15 @@ inputs:
     description: 'Suite fan-out (BP_RUST_BRRTROUTER): images slimmed and pushed at once. Default: $OCTOPILOT_FANOUT_PARALLEL, else 6.'
     required: false
     default: ''
+  sccache:
+    description: >
+      'true': the buildpack's rustc runs under sccache against the shared cache the runner advertises
+      (OCTOPILOT_SCCACHE_WEBDAV_ENDPOINT / _USERNAME / _PASSWORD). op forwards OP_SCCACHE and the SCCACHE_* variables
+      to the build as platform env (never a layer); the octopilot/rust buildpack (BP_RUST_SCCACHE) installs sccache and
+      prints its hit/miss stats in the build log. Pull requests get the cache read-only. No cache on the runner: a
+      warning, and the build runs without it.
+    required: false
+    default: 'false'
 outputs:
   digest:
     description: 'Container image digest (e.g. sha256:...).'
@@ -118,6 +127,7 @@ runs:
         OCTOPILOT_IMAGE_REGISTRY: ${{ inputs.image_registry || env.OCTOPILOT_IMAGE_REGISTRY }}
         OP_PROPAGATION_TIMEOUT: ${{ inputs.propagation_timeout || env.OCTOPILOT_PROPAGATION_TIMEOUT || '10m' }}
         OP_FANOUT_PARALLEL: ${{ inputs.fanout_parallel || env.OCTOPILOT_FANOUT_PARALLEL || '6' }}
+        INPUT_SCCACHE: ${{ inputs.sccache }}
       run: |
         # The input / workflow value, else the runner's own mirror (OCTOPILOT_RUNNER_IMAGE_REGISTRY on self-hosted pods).
         OCTOPILOT_IMAGE_REGISTRY="${OCTOPILOT_IMAGE_REGISTRY:-${OCTOPILOT_RUNNER_IMAGE_REGISTRY:-}}"
@@ -156,6 +166,23 @@ runs:
         fi
         export GOOGLE_CREDENTIALS_CONTENT OP_PROPAGATION_TIMEOUT OP_FANOUT_PARALLEL
         echo "op: propagation timeout ${OP_PROPAGATION_TIMEOUT}, suite fan-out ${OP_FANOUT_PARALLEL} at a time"
+
+        # Shared compile cache (sccache): op forwards OP_SCCACHE + SCCACHE_* to the buildpack. Values travel by name
+        # (-e NAME) so the credentials never appear on a command line or in the log.
+        SCCACHE_ARGS=()
+        if [ "${INPUT_SCCACHE}" = "true" ]; then
+          if [ -n "${OCTOPILOT_SCCACHE_WEBDAV_ENDPOINT:-}" ]; then
+            export OP_SCCACHE=true SCCACHE_WEBDAV_ENDPOINT="${OCTOPILOT_SCCACHE_WEBDAV_ENDPOINT}"
+            export SCCACHE_WEBDAV_USERNAME="${OCTOPILOT_SCCACHE_WEBDAV_USERNAME:-}" SCCACHE_WEBDAV_PASSWORD="${OCTOPILOT_SCCACHE_WEBDAV_PASSWORD:-}"
+            SCCACHE_ARGS+=(-e OP_SCCACHE -e SCCACHE_WEBDAV_ENDPOINT -e SCCACHE_WEBDAV_USERNAME -e SCCACHE_WEBDAV_PASSWORD)
+            case "${GITHUB_EVENT_NAME:-}" in
+              pull_request*) export SCCACHE_WEBDAV_RW_MODE=READ_ONLY; SCCACHE_ARGS+=(-e SCCACHE_WEBDAV_RW_MODE) ;;
+            esac
+            echo "sccache: buildpack compiles use ${SCCACHE_WEBDAV_ENDPOINT}"
+          else
+            echo "::warning::sccache requested, but this runner advertises no shared cache (OCTOPILOT_SCCACHE_WEBDAV_ENDPOINT); building without it"
+          fi
+        fi
 
         if [ "${INPUT_BUILD_BYPASS}" == "true" ]; then
             echo "Bypassing container execution. Running op directly..."
@@ -246,6 +273,7 @@ runs:
 
             docker run --rm \
                 "${DOCKER_ARGS[@]}" \
+                "${SCCACHE_ARGS[@]}" \
                 -v "$GITHUB_WORKSPACE:/workspace" \
                 -v "${HOME}/.docker:/docker-config:ro" \
                 -e DOCKER_CONFIG=/docker-config \

@@ -1,0 +1,75 @@
+name: 'sccache (shared Rust compile cache)'
+description: >
+  Starts or reports sccache for the cargo steps of a job. `start` installs a pinned sccache, starts its server against
+  the shared cache the runner advertises (OCTOPILOT_SCCACHE_WEBDAV_ENDPOINT / _USERNAME / _PASSWORD, set on the ms02
+  ARC runner pods) and sets RUSTC_WRAPPER and CARGO_INCREMENTAL=0 for later steps. The server holds the cache
+  credentials; compiles only talk to the server, so nothing secret is written to GITHUB_ENV. Pull requests get the
+  cache read-only. `stats` prints `sccache --show-stats` to the log and the job summary and stops the server.
+  A runner without a cache, or a failed download, warns and leaves the job building without sccache.
+inputs:
+  mode:
+    description: "start or stats"
+    required: false
+    default: start
+  version:
+    description: "sccache release (the checksums below are for this version)."
+    required: false
+    default: "0.18.0"
+outputs:
+  enabled:
+    description: "'true' when the server is up and RUSTC_WRAPPER is set."
+    value: ${{ steps.start.outputs.enabled }}
+runs:
+  using: "composite"
+  steps:
+    - name: Start sccache
+      id: start
+      if: inputs.mode == 'start'
+      shell: bash
+      env:
+        SCCACHE_VERSION: ${{ inputs.version }}
+      run: |
+        set -uo pipefail
+        off() { echo "::warning::sccache: $1; building without it"; echo "enabled=false" >> "$GITHUB_OUTPUT"; exit 0; }
+        [ -n "${OCTOPILOT_SCCACHE_WEBDAV_ENDPOINT:-}" ] || off "this runner advertises no shared cache (OCTOPILOT_SCCACHE_WEBDAV_ENDPOINT)"
+        case "$(uname -m)" in
+          x86_64) triple=x86_64-unknown-linux-musl; sha=45f1447fbe231e3037bde351ef70677dd212216c8d62ae7ca409fecc4d6acc89 ;;
+          aarch64) triple=aarch64-unknown-linux-musl; sha=2b3284d5da3b46a47dc4229e75bb7b88ac4aa99c8d754fb7d2f84997e5a4354a ;;
+          *) off "no pinned build for $(uname -m)" ;;
+        esac
+        [ "${SCCACHE_VERSION}" = "0.18.0" ] || off "checksums are pinned for 0.18.0 only"
+        dir="${RUNNER_TEMP}/sccache-bin"; name="sccache-v${SCCACHE_VERSION}-${triple}"
+        mkdir -p "$dir"
+        curl --proto '=https' --tlsv1.2 -fsSL -o "$dir/sccache.tar.gz" \
+          "https://github.com/mozilla/sccache/releases/download/v${SCCACHE_VERSION}/${name}.tar.gz" || off "download failed"
+        echo "${sha}  $dir/sccache.tar.gz" | sha256sum -c --quiet - || off "checksum mismatch"
+        tar -xzf "$dir/sccache.tar.gz" -C "$dir" --strip-components=1 "${name}/sccache" || off "unpack failed"
+        rm -f "$dir/sccache.tar.gz"
+        rw=READ_WRITE
+        case "${GITHUB_EVENT_NAME:-}" in pull_request*) rw=READ_ONLY ;; esac
+        # Credentials go to the server process only.
+        SCCACHE_WEBDAV_ENDPOINT="${OCTOPILOT_SCCACHE_WEBDAV_ENDPOINT}" \
+        SCCACHE_WEBDAV_USERNAME="${OCTOPILOT_SCCACHE_WEBDAV_USERNAME:-}" \
+        SCCACHE_WEBDAV_PASSWORD="${OCTOPILOT_SCCACHE_WEBDAV_PASSWORD:-}" \
+        SCCACHE_WEBDAV_RW_MODE="$rw" SCCACHE_IDLE_TIMEOUT=0 \
+          "$dir/sccache" --start-server >/dev/null 2>&1 || off "server did not start (cache unreachable?)"
+        "$dir/sccache" --zero-stats >/dev/null 2>&1 || true
+        {
+          echo "RUSTC_WRAPPER=$dir/sccache"
+          echo "CARGO_INCREMENTAL=0"
+          echo "SCCACHE_IDLE_TIMEOUT=0"
+        } >> "$GITHUB_ENV"
+        echo "$dir" >> "$GITHUB_PATH"
+        echo "enabled=true" >> "$GITHUB_OUTPUT"
+        echo "sccache ${SCCACHE_VERSION}: ${OCTOPILOT_SCCACHE_WEBDAV_ENDPOINT} (${rw})"
+
+    - name: sccache stats
+      if: inputs.mode == 'stats'
+      shell: bash
+      run: |
+        bin="${RUNNER_TEMP}/sccache-bin/sccache"
+        [ -x "$bin" ] || exit 0
+        stats="$("$bin" --show-stats 2>&1 || true)"
+        echo "$stats"
+        { echo "### sccache"; echo '```'; echo "$stats"; echo '```'; } >> "$GITHUB_STEP_SUMMARY"
+        "$bin" --stop-server >/dev/null 2>&1 || true
