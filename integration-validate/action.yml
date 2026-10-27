@@ -103,8 +103,9 @@ runs:
       with:
         toolchain: ${{ steps.resolve.outputs.version || 'stable' }}
 
+    # Skipped with sccache (see the test action: the save goes up the self-hosted runners' slow uplink).
     - name: Cache Cargo and rustup
-      if: steps.resolve.outputs.language == 'rust'
+      if: steps.resolve.outputs.language == 'rust' && steps.resolve.outputs.sccache != 'true'
       uses: actions/cache@v6
       with:
         path: |

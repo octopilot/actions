@@ -141,9 +141,11 @@ runs:
         cache-on-failure: "true"
         cache-all-crates: "true"
 
-    # Cache Cargo registry + rustup + extracted binaries (not target/).
+    # Cache Cargo registry + rustup + extracted binaries (not target/). Skipped with sccache: on the self-hosted runners
+    # the save went up the 12 Mbit/s uplink (8+ minutes in a post step after every Cargo.lock or toolchain change), while
+    # crates and toolchains download over the faster downlink and compiled crates come from sccache.
     - name: Cache Cargo and rustup
-      if: steps.ctx.outputs.language == 'rust'
+      if: steps.ctx.outputs.language == 'rust' && steps.ctx.outputs.sccache != 'true'
       uses: actions/cache@v6
       with:
         path: |
