@@ -57,7 +57,7 @@ on:
       build_cache:
         description: Keep the pack build cache as a GHCR image. Same contract as pipeline.yml.
         type: boolean
-        default: true
+        default: false
       suite_fanout_parallel:
         description: Suite fan-out images pushed at once. Same contract as pipeline.yml.
         type: number

@@ -190,11 +190,11 @@ on:
       build_cache:
         description: >
           Keep the pack build cache as a GHCR image (<owner>/<image>-buildcache) that every image build restores and
-          exports. Turn it off where uploading the cache costs more than the build it saves: PriceWhisperer's suite
-          exports a 9.3 GB rust-target layer that changes every build, and uploading it took over half an hour on
-          the self-hosted runners' uplink against an eight-minute cold compile.
+          exports. Off by default: PriceWhisperer's suite exports a 9.3 GB rust-target layer that changes every build,
+          and uploading it took about an hour on the self-hosted runners' uplink against an eight-minute cold compile.
+          Off, op is given no cache image and creates none.
         type: boolean
-        default: true
+        default: false
       suite_fanout_parallel:
         description: >
           Suite builds (BP_RUST_BRRTROUTER): images slimmed and pushed at once by the fan-out. A BP_RUST_VARIANTS suite
