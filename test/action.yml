@@ -164,6 +164,22 @@ runs:
       if: steps.ctx.outputs.language == 'rust' && steps.ctx.outputs.sccache == 'true'
       uses: octopilot/actions/sccache@main
 
+    # The shared target dir lives in runner temp (sccache keys include it), but repos hard-code ./target paths (BRRTRouter's
+    # test harness builds pet_store and reads target/x86_64-unknown-linux-musl/release/pet_store): point ./target there,
+    # at the repository root and in the build context.
+    - name: Link ./target to the shared target dir
+      if: steps.ctx.outputs.language == 'rust' && steps.ctx.outputs.sccache == 'true'
+      shell: bash
+      env:
+        TARGET_DIR: ${{ steps.ctx.outputs.target_dir }}
+        WORKDIR: ${{ steps.ctx.outputs.context }}
+      run: |
+        mkdir -p "$TARGET_DIR"
+        for d in "$GITHUB_WORKSPACE" "$GITHUB_WORKSPACE/$WORKDIR"; do
+          [ -e "$d/target" ] && [ ! -L "$d/target" ] && { echo "keeping existing $d/target"; continue; }
+          ln -sfn "$TARGET_DIR" "$d/target"
+        done
+
     - name: Setup Python
       if: steps.ctx.outputs.language == 'python'
       uses: actions/setup-python@v7
