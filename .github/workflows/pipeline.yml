@@ -213,8 +213,8 @@ on:
       release_notes_provider:
         description: >
           Tag runs: who writes the GitHub Release notes. anthropic (needs the ANTHROPIC_API_KEY secret) or openai, which
-          is any OpenAI-compatible server: with release_notes_base_url, a self-hosted one (vLLM) reachable from
-          `runner`, no key. If generation fails, GitHub's generated notes are used and the release goes ahead.
+          is any OpenAI-compatible server: with release_notes_base_url, a self-hosted one (vLLM or a LiteLLM gateway)
+          reachable from `runner`, with the RELEASE_NOTES_API_KEY secret if it needs a key. If generation fails, GitHub's generated notes are used and the release goes ahead.
         type: string
         default: anthropic
       release_notes_base_url:
@@ -262,6 +262,11 @@ on:
         required: false
       ANTHROPIC_API_KEY:
         description: API key for AI-generated release notes (tags only).
+        required: false
+      RELEASE_NOTES_API_KEY:
+        description: >-
+          openai provider: the key of the OpenAI-compatible server at release_notes_base_url (e.g. a LiteLLM
+          gateway's virtual key). Empty: no Authorization header.
         required: false
     outputs:
       pipeline-context:
@@ -967,6 +972,7 @@ jobs:
         uses: octopilot/actions/release@main
         env:
           OPENAI_BASE_URL: ${{ inputs.release_notes_base_url }}
+          OPENAI_API_KEY: ${{ secrets.RELEASE_NOTES_API_KEY }}
         with:
           image_registry: ${{ inputs.image_registry }}
           version: ${{ github.ref_name }}
