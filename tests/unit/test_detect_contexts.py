@@ -485,7 +485,7 @@ build:
         images = [e for e in ctx["integration_matrix"] if e.get("type") == "image"]
         assert len(images) == 1
         assert images[0]["builder"] == detect.DEFAULT_BUILDER
-        assert images[0]["builder"].endswith(":rust-builder-d741287")
+        assert images[0]["builder"].endswith(":rust-builder-16c038a")
 
     def test_registry_run_image_depends_on_short_artifact_name(self, tmp_path, capsys):
         # igniteflux names the base artifact `igniteflux-base` and points the app

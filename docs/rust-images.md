@@ -18,7 +18,7 @@ One crate, one image. `Cargo.toml` at the context root (or under
 - image: ghcr.io/octopilot/igniteflux
   context: .
   buildpacks:
-    builder: ghcr.io/octopilot/builder-jammy-base:rust-builder-d741287
+    builder: ghcr.io/octopilot/builder-jammy-base:rust-builder-16c038a
     runImage: ghcr.io/octopilot/igniteflux-base:latest
     env:
       - BP_TEST_COMMAND=./hack/test-unit.sh
@@ -90,8 +90,8 @@ which process is the default.
 
 ## What the published buildpack does today
 
-Builder `rust-builder-d741287` (and `:latest`) contains `octopilot/rust`
-**0.1.15**. That is the selection table above: only `kind = bin` becomes a
+Builder `rust-builder-16c038a` (and `:latest`) contains `octopilot/rust`
+**0.1.20** (BP_RUST_SCCACHE; cargo-sweep off unless BP_RUST_SWEEP=true). That is the selection table above: only `kind = bin` becomes a
 process, `default-run` or the package name chooses `web`, and
 `BP_RUST_BINARY_NAME` is an override. A prune that drops `bin/<name>` fails
 the build.
@@ -108,7 +108,7 @@ Pack artifacts use the Octopilot builder, not
 this layout.
 
 ```yaml
-builder: ghcr.io/octopilot/builder-jammy-base:rust-builder-d741287
+builder: ghcr.io/octopilot/builder-jammy-base:rust-builder-16c038a
 ```
 
 That tag is the image behind `:latest` (`octopilot/rust` 0.1.15, lifecycle

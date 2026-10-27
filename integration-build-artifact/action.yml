@@ -84,7 +84,7 @@ runs:
         echo "dockerfile=$(echo "$ARTIFACT" | jq -r '.dockerfile // "Dockerfile"')" >> "$GITHUB_OUTPUT"
         # Same pin as detect-contexts DEFAULT_BUILDER. See
         # octopilot-pipeline-tools/docs/image-launch-and-builder-tags.md.
-        echo "builder=$(echo "$ARTIFACT" | jq -r '.builder // "ghcr.io/octopilot/builder-jammy-base:rust-builder-d741287"')" >> "$GITHUB_OUTPUT"
+        echo "builder=$(echo "$ARTIFACT" | jq -r '.builder // "ghcr.io/octopilot/builder-jammy-base:rust-builder-16c038a"')" >> "$GITHUB_OUTPUT"
         echo "build_env=$(echo "$ARTIFACT" | jq -r '.build_env // ""')" >> "$GITHUB_OUTPUT"
         echo "run_image=$(echo "$ARTIFACT" | jq -r '.run_image // ""')" >> "$GITHUB_OUTPUT"
 
