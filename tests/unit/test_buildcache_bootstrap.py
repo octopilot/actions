@@ -86,3 +86,16 @@ def test_older_op_builds_without_cache_when_the_push_is_refused(tmp_path: Path, 
 @pytest.mark.parametrize(("path", "job"), STEPS)
 def test_step_gets_the_op_version(path: Path, job: str) -> None:
     assert cache_step(path, job)["env"]["OP_VERSION"] == "${{ inputs.op_version }}"
+
+
+def test_build_cache_can_be_turned_off() -> None:
+    pipe = yaml.safe_load((WORKFLOWS / "pipeline.yml").read_text())
+    assert pipe[True]["workflow_call"]["inputs"]["build_cache"]["default"] is True
+    assert pipe["jobs"]["integration-artifacts-wave1"]["with"]["build_cache"] == "${{ inputs.build_cache }}"
+    wave = yaml.safe_load((WORKFLOWS / "integration-artifacts-wave.yml").read_text())
+    assert wave[True]["workflow_call"]["inputs"]["build_cache"]["default"] is True
+    for path, job in STEPS:
+        steps = yaml.safe_load(path.read_text())["jobs"][job]["steps"]
+        for name in ("Login to GHCR for build cache", "Derive build-cache image name"):
+            step = next(s for s in steps if s.get("name") == name)
+            assert step["if"].startswith("inputs.build_cache && "), (path.name, name)

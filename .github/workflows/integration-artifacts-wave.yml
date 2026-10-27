@@ -54,6 +54,10 @@ on:
         description: How long a pushed image may take to resolve from the registry. Same contract as pipeline.yml.
         type: string
         default: 10m
+      build_cache:
+        description: Keep the pack build cache as a GHCR image. Same contract as pipeline.yml.
+        type: boolean
+        default: true
       suite_fanout_parallel:
         description: Suite fan-out images pushed at once. Same contract as pipeline.yml.
         type: number
@@ -98,13 +102,13 @@ jobs:
       # (ttl.sh's per-run UUIDs are useless for caching). Old op versions
       # ignore the cache image harmlessly; op v1.0.18+ restores/exports it.
       - name: Login to GHCR for build cache
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && matrix.type == 'image'
+        if: inputs.build_cache && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && matrix.type == 'image'
         shell: bash
         run: echo "${{ github.token }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Derive build-cache image name
         id: cache
-        if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && matrix.type == 'image'
+        if: inputs.build_cache && (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && matrix.type == 'image'
         shell: bash
         env:
           MATRIX_IMAGE: ${{ matrix.image }}
