@@ -25,6 +25,8 @@ if ! [ "$KEEP" -gt 0 ] 2>/dev/null; then
 fi
 API="${GITHUB_API_URL:-https://api.github.com}/repos/${REPO}"
 gh_api() { curl -fsS -H "Authorization: Bearer ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "$@"; }
+# DELETE returning only the HTTP status (204 deleted, 403 the token may not delete, anything else a failure).
+gh_delete() { curl -sS -o /dev/null -w '%{http_code}' -X DELETE -H "Authorization: Bearer ${GITHUB_TOKEN}" -H "Accept: application/vnd.github+json" -H "X-GitHub-Api-Version: 2022-11-28" "$1" 2>/dev/null || echo 000; }
 
 all='[]'; page=1
 while :; do
@@ -48,7 +50,7 @@ candidates="$(jq -c --argjson keep "$KEEP" --arg cutoff "$cutoff" --argjson self
 echo "trim: ${REPO}: $(jq length <<<"$all") artifacts, $(jq length <<<"$candidates") beyond the newest ${KEEP} of each name${cutoff:+ or created before ${cutoff}}"
 
 declare -A live=()
-deleted=0; freed=0; held=0; failed=0
+deleted=0; freed=0; held=0; failed=0; denied=0
 while IFS=$'\t' read -r id name size run; do
   [ -n "$id" ] || continue
   if [ "$run" != 0 ] && [ -z "${live[$run]+x}" ]; then
@@ -57,14 +59,18 @@ while IFS=$'\t' read -r id name size run; do
   fi
   if [ "${live[$run]:-0}" = 1 ]; then held=$((held+1)); continue; fi
   if [ -n "${DRY_RUN:-}" ]; then echo "trim (dry run): would delete ${name} #${id}"; deleted=$((deleted+1)); freed=$((freed+size)); continue; fi
-  if gh_api -X DELETE "${API}/actions/artifacts/${id}" >/dev/null 2>&1; then
-    deleted=$((deleted+1)); freed=$((freed+size))
-  else
-    failed=$((failed+1))
-  fi
+  code="$(gh_delete "${API}/actions/artifacts/${id}")"
+  case "$code" in
+    2??) deleted=$((deleted+1)); freed=$((freed+size)) ;;
+    # The token cannot delete (no actions: write): every further call would be refused too, and each costs a round
+    # trip (915 of them ran BRRTRouter's Detect job past its 10-minute limit on 27 Oct). Stop at the first one.
+    403) denied=1; break ;;
+    *) failed=$((failed+1)) ;;
+  esac
 done < <(jq -r '.[] | "\(.id)\t\(.name)\t\(.size_in_bytes)\t\(.run)"' <<<"$candidates")
 
-[ "$failed" -eq 0 ] || echo "::warning::trim: ${failed} artifact(s) could not be deleted (the job needs actions: write)"
+[ "$denied" -eq 0 ] || echo "::warning::trim: deleting is refused (HTTP 403): give the calling job actions: write; nothing more tried"
+[ "$failed" -eq 0 ] || echo "::warning::trim: ${failed} artifact(s) could not be deleted"
 verb="deleted"; [ -z "${DRY_RUN:-}" ] || verb="would delete (dry run)"
 msg="kept the newest ${KEEP} of each artifact name${cutoff:+ younger than ${MAX_AGE_DAYS} days}; ${verb} ${deleted} ($((freed / 1048576)) MiB)"
 [ "$held" -eq 0 ] || msg="${msg}, ${held} left for runs still going"

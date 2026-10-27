@@ -29,6 +29,10 @@ inputs:
       Requires smoke-binary-path.
     required: false
     default: ''
+  upload-binaries:
+    description: "'true': upload each release binary as its own run artifact (bin-<name>). Default off: nothing downloads them."
+    required: false
+    default: 'false'
   sccache:
     description: "'true': the release build compiles through the runner's shared sccache (see the test action)."
     required: false
@@ -142,17 +146,15 @@ runs:
         RUSTFLAGS: ${{ runner.os == 'Linux' && '-C link-arg=-fuse-ld=mold' || '' }}
       run: cargo build --release
 
-    # Collect + upload per-binary artifacts: validate is the canonical
-    # release build of the whole workspace, so this is the ONE place the
-    # per-binary uploads happen — downstream jobs download exactly the
-    # binary they need (actions/download-artifact with name: bin-<binary>)
-    # instead of restoring the whole build_artifacts cache tree.
+    # Collect binaries into build_artifacts. With upload-binaries, also upload each as its own run artifact
+    # (bin-<binary>) for a downstream job to download; off by default, since nothing downloads them and on the
+    # self-hosted runners they cost the uplink (~250 MB per PriceWhisperer run).
     - name: Collect Rust binaries into build_artifacts
       if: steps.resolve.outputs.language == 'rust'
       uses: octopilot/actions/collect-rust-binaries@main
       with:
         target-dir: ${{ steps.resolve.outputs.target_dir }}
-        upload: per-binary
+        upload: ${{ inputs.upload-binaries == 'true' && 'per-binary' || 'none' }}
 
     - name: sccache stats
       if: always() && steps.resolve.outputs.language == 'rust' && steps.resolve.outputs.sccache == 'true'

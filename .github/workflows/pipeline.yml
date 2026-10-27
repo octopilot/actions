@@ -195,6 +195,22 @@ on:
           Off, op is given no cache image and creates none.
         type: boolean
         default: false
+      artifacts_runner:
+        description: >
+          Runner for the integration image builds and pushes (integration-artifacts and its dependent wave) only;
+          empty = runner. Same format as runner. A public repository on the self-hosted ms02 runners sets
+          ubuntu-24.04 here so its ~1 GB image pushes use GitHub's uplink, not ms02's ~15 Mbit/s one, which
+          PriceWhisperer's releases need (27 Oct: sesame-idam's push starved PW validate's uploads past its timeout).
+          Tests and validate stay on runner (with sccache); builds here get no sccache unless that runner has one.
+        type: string
+        default: ''
+      binary_artifacts:
+        description: >
+          Upload every release binary from Integration (validate) as its own run artifact (bin-<name>). Off by
+          default: nothing downloads them (no octopilot workflow or Microscaler repo did, 27 Oct 2026), and on the
+          self-hosted runners they cost the uplink ~250 MB per PriceWhisperer run.
+        type: boolean
+        default: false
       sccache:
         description: >
           Shared Rust compile cache (sccache) on self-hosted runners that advertise one (OCTOPILOT_SCCACHE_WEBDAV_*;
@@ -386,8 +402,9 @@ jobs:
     name: Integration (validate)
     needs: [detect, lint, test]
     runs-on: ${{ (startsWith(inputs.runner, '[') && fromJSON(inputs.runner)) || inputs.runner }}
-    # Hard cap — a hung test must fail the job, not burn 6h of runner time.
-    timeout-minutes: 30
+    # Hard cap — a hung build must fail the job, not burn 6h of runner time. 45: a whole-workspace release build plus
+    # uploads over the self-hosted runners' shared uplink (30 cut both PW releases off on 27 Oct).
+    timeout-minutes: 45
     outputs:
       uuid: ${{ steps.validate.outputs.uuid }}
     steps:
@@ -398,13 +415,14 @@ jobs:
         with:
           pipeline-context: ${{ needs.detect.outputs.pipeline-context }}
           sccache: ${{ inputs.sccache }}
+          upload-binaries: ${{ inputs.binary_artifacts }}
 
   # ── 4b. Integration artifacts (matrix from skaffold build.artifacts + chart) ─
   integration-artifacts:
     name: Integration (${{ matrix.suffix || matrix.output_key }})
     needs: [detect, integration-validate]
     if: toJSON(fromJson(needs.detect.outputs.pipeline-context).integration_matrix_wave0) != '[]'
-    runs-on: ${{ (startsWith(inputs.runner, '[') && fromJSON(inputs.runner)) || inputs.runner }}
+    runs-on: ${{ (startsWith(inputs.artifacts_runner || inputs.runner, '[') && fromJSON(inputs.artifacts_runner || inputs.runner)) || inputs.artifacts_runner || inputs.runner }}
     # packages:write lets the job push the pack build-cache image to GHCR
     # (warm buildpack caches across ephemeral runners). Other permissions
     # revert to restrictive defaults once any permission is declared.
@@ -544,7 +562,7 @@ jobs:
       id-token: write
     uses: octopilot/actions/.github/workflows/integration-artifacts-wave.yml@main
     with:
-      runner: ${{ inputs.runner }}
+      runner: ${{ inputs.artifacts_runner || inputs.runner }}
       op_version: ${{ inputs.op_version }}
       image_registry: ${{ inputs.image_registry }}
       ttl_uuid: ${{ needs.integration-validate.outputs.uuid }}
