@@ -224,7 +224,13 @@ def test_nextest_install_downloads_to_file_with_retries():
 
 @pytest.mark.parametrize(
     "path",
-    ["test/action.yml", "lint/action.yml", "sccache/action.yml", "promote-registry/action.yml", "kotlin-lint/action.yml"],
+    [
+        "test/action.yml",
+        "lint/action.yml",
+        "sccache/action.yml",
+        "promote-registry/action.yml",
+        "kotlin-lint/action.yml",
+    ],
 )
 def test_composite_actions_download_through_fetch(path):
     text = (ROOT / path).read_text()
@@ -233,7 +239,8 @@ def test_composite_actions_download_through_fetch(path):
 
 
 def test_kind_action_is_preseeded_with_matching_versions():
-    for path, pre in [("test/action.yml", "common/install-kind.sh"), (".github/workflows/pipeline.yml", "setup-kind@main")]:
+    seeded = [("test/action.yml", "common/install-kind.sh"), (".github/workflows/pipeline.yml", "setup-kind@main")]
+    for path, pre in seeded:
         text = (ROOT / path).read_text()
         assert pre in text, path
         assert text.index(pre) < text.index("helm/kind-action@v1"), path
