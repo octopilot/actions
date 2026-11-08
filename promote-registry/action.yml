@@ -49,8 +49,9 @@ runs:
           *) echo "::error::unsupported arch $(uname -m)"; exit 1 ;;
         esac
         mkdir -p "$HOME/.local/bin"
-        curl -fsSL "https://github.com/google/go-containerregistry/releases/download/v0.20.3/go-containerregistry_Linux_${ARCH}.tar.gz" \
-          | tar -xz -C "$HOME/.local/bin" crane
+        bash "${{ github.action_path }}/../common/fetch.sh" \
+          "https://github.com/google/go-containerregistry/releases/download/v0.20.3/go-containerregistry_Linux_${ARCH}.tar.gz" "$RUNNER_TEMP/crane.tar.gz"
+        tar -xz -C "$HOME/.local/bin" -f "$RUNNER_TEMP/crane.tar.gz" crane && rm -f "$RUNNER_TEMP/crane.tar.gz"
         echo "$HOME/.local/bin" >> "$GITHUB_PATH"
 
     - name: Promote

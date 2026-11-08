@@ -354,7 +354,12 @@ def synthesize_rust_test_command(context_dir: str) -> str | None:
     # runner. Prebuilt binary install keeps this fast (~1s).
     parts.append(
         "(command -v cargo-nextest >/dev/null 2>&1 || "
-        'curl -LsSf https://get.nexte.st/latest/linux | tar zxf - -C "$HOME/.cargo/bin")'
+        # Download to a file with retries, then unpack: get.nexte.st redirects to GitHub
+        # release assets, which intermittently answer 5xx; a one-shot `curl | tar` turned
+        # that into a failed release build (2026-11-08).
+        "(curl -fsSL --retry 6 --retry-all-errors --retry-delay 5 --retry-max-time 240 "
+        '--connect-timeout 20 -o "${RUNNER_TEMP:-/tmp}/nextest.tar.gz" https://get.nexte.st/latest/linux '
+        '&& tar zxf "${RUNNER_TEMP:-/tmp}/nextest.tar.gz" -C "$HOME/.cargo/bin"))'
     )
     parts.append(
         "cargo llvm-cov nextest --workspace --all-targets --no-fail-fast "

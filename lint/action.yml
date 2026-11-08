@@ -230,7 +230,8 @@ runs:
         fi
         HELM_VERSION="${HELM_VERSION:-3.16.4}"
         echo "Installing Helm ${HELM_VERSION}..."
-        curl -sSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz" | tar -xzf - -C /tmp
+        bash "${{ github.action_path }}/../common/fetch.sh" "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz" /tmp/helm.tar.gz
+        tar -xzf /tmp/helm.tar.gz -C /tmp && rm -f /tmp/helm.tar.gz
         sudo mv /tmp/linux-amd64/helm /usr/local/bin/helm
         helm version --short
 

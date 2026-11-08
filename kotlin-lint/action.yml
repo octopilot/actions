@@ -44,7 +44,7 @@ runs:
       run: |
         set -euo pipefail
         VERSION="${{ inputs.ktlint-version }}"
-        curl -sSLO "https://github.com/pinterest/ktlint/releases/download/${VERSION}/ktlint"
+        bash "${{ github.action_path }}/../common/fetch.sh" "https://github.com/pinterest/ktlint/releases/download/${VERSION}/ktlint" ktlint
         chmod a+x ktlint
         sudo mv ktlint /usr/local/bin/
         ktlint --version

@@ -3,16 +3,42 @@ import platform
 import stat
 import subprocess
 import sys
+import time
+import urllib.error
 import urllib.request
 
+DOWNLOAD_ATTEMPTS = 6
 
-def download_file(url, dest_path):
+
+def _retryable(err):
+    """5xx, 408, 429 and connection-level errors are transient; any other 4xx is not."""
+    if isinstance(err, urllib.error.HTTPError):
+        return err.code >= 500 or err.code in (408, 429)
+    return isinstance(err, (urllib.error.URLError, TimeoutError, ConnectionError, OSError))
+
+
+def download_file(url, dest_path, attempts=DOWNLOAD_ATTEMPTS, sleep=time.sleep):
+    """Download url to dest_path, retrying transient failures with backoff.
+
+    GitHub release downloads intermittently answer 5xx (2026-11-08: 504s for an hour
+    with githubstatus green); one attempt turned that into a failed pipeline.
+    """
     print(f"Downloading {url} to {dest_path}...")
-    try:
-        urllib.request.urlretrieve(url, dest_path)
-    except Exception as e:
-        print(f"Failed to download {url}: {e}", file=sys.stderr)
-        sys.exit(1)
+    part = f"{dest_path}.part"
+    for attempt in range(1, attempts + 1):
+        try:
+            urllib.request.urlretrieve(url, part)
+            os.replace(part, dest_path)
+            return
+        except Exception as e:
+            if os.path.exists(part):
+                os.remove(part)
+            if attempt == attempts or not _retryable(e):
+                print(f"Failed to download {url}: {e}", file=sys.stderr)
+                sys.exit(1)
+            delay = attempt * attempt * 3
+            print(f"Attempt {attempt}/{attempts} for {url} failed ({e}); retrying in {delay}s", file=sys.stderr)
+            sleep(delay)
 
 
 def make_executable(path):

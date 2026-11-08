@@ -208,7 +208,8 @@ runs:
           exit 0
         fi
         HELM_VERSION="${HELM_VERSION:-3.16.4}"
-        curl -sSL "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz" | tar -xzf - -C /tmp
+        bash "${{ github.action_path }}/../common/fetch.sh" "https://get.helm.sh/helm-v${HELM_VERSION}-linux-amd64.tar.gz" /tmp/helm.tar.gz
+        tar -xzf /tmp/helm.tar.gz -C /tmp && rm -f /tmp/helm.tar.gz
         sudo mv /tmp/linux-amd64/helm /usr/local/bin/helm
         helm version --short
 
@@ -220,11 +221,20 @@ runs:
         OCTOPILOT_IMAGE_REGISTRY: ${{ inputs.image_registry || env.OCTOPILOT_IMAGE_REGISTRY }}
       run: echo "ref=$(bash "${{ github.action_path }}/../common/resolve-image.sh" kindest/node:v1.34.3)" >> "$GITHUB_OUTPUT"
 
+    # kind-action downloads kind/kubectl once with no retry; a 5xx from GitHub release
+    # downloads then fails the job. Pre-seed its tool-cache paths with retrying,
+    # checksum-verified downloads (same versions) so it skips its own.
+    - name: Install kind and kubectl (with retries)
+      if: steps.ctx.outputs.language == 'helm'
+      shell: bash
+      run: bash "${{ github.action_path }}/../common/install-kind.sh" v0.31.0 v1.35.0
+
     - name: Create Kind cluster (Kubernetes 1.34.3)
       if: steps.ctx.outputs.language == 'helm'
       uses: helm/kind-action@v1
       with:
         version: v0.31.0
+        kubectl_version: v1.35.0
         node_image: ${{ steps.kind_image.outputs.ref }}
         cluster_name: helm-test
         wait: 120s

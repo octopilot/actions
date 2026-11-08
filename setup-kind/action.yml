@@ -1,0 +1,24 @@
+name: 'Setup kind (with retries)'
+description: >
+  Pre-install kind and kubectl into the runner tool cache with retrying, checksum-verified
+  downloads, so a following helm/kind-action step (same `version` / `kubectl_version`) skips
+  its own single-shot downloads. Guards cluster creation against intermittent 5xx from
+  GitHub release downloads.
+author: 'Octopilot'
+
+inputs:
+  version:
+    description: 'kind version (pass the same value to helm/kind-action `version`)'
+    required: false
+    default: 'v0.31.0'
+  kubectl_version:
+    description: 'kubectl version (pass the same value to helm/kind-action `kubectl_version`)'
+    required: false
+    default: 'v1.35.0'
+
+runs:
+  using: 'composite'
+  steps:
+    - name: Install kind and kubectl
+      shell: bash
+      run: bash "${{ github.action_path }}/../common/install-kind.sh" "${{ inputs.version }}" "${{ inputs.kubectl_version }}"
