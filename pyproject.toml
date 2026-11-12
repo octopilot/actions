@@ -68,6 +68,7 @@ ignore = [
 "*/aks_updater.py" = ["T201"]
 "*/read_properties.py" = ["T201"]
 "bump-version/bump_version.py" = ["T201"]
+"library-release/release.py" = ["T201", "S310"]
 "common/**/notes.py" = ["S310"]
 "hack/**" = ["T201"]
 # Tests: nested with for patch stacking is readable

@@ -1,0 +1,169 @@
+name: Library release
+
+# Releases a library that consumers take from git: tags a commit that is already on the release branch and green as
+# vX.Y.Z and creates its GitHub Release. Nothing is committed or pushed to a branch, so it works on protected branches
+# and on forks that follow an upstream, and the tag names exactly the commit CI tested. Consumers pin
+# `tag = "vX.Y.Z"`; the tag, not Cargo.toml, is the version.
+#
+# Version: the first release takes the version in the root Cargo.toml; after that, bump the highest vX.Y.Z tag in the
+# repository (or set `version`). A release never goes below the highest tag, and never tags a commit older than the
+# newest release on the branch.
+#
+# Notes: with the RELEASE_NOTES_API_KEY secret, written by the release-notes model (octopilot/actions/release, the
+# same generator the product pipelines use, given only this repository's commit subjects); otherwise a changelog of
+# the commit subjects since the previous tag. Either way a line naming a downstream project is left out.
+#
+# Caller (.github/workflows/release.yml in the library):
+#
+#   on:
+#     workflow_dispatch:
+#       inputs:
+#         bump: { type: choice, options: [patch, minor, major], default: patch }
+#         ref: { type: string, default: "" }
+#         version: { type: string, default: "" }
+#   permissions: { contents: write, checks: read, statuses: read }
+#   jobs:
+#     release:
+#       uses: octopilot/actions/.github/workflows/library-release.yml@main
+#       with: { branch: main, bump: "${{ inputs.bump }}", ref: "${{ inputs.ref }}", version: "${{ inputs.version }}" }
+#       secrets:
+#         RELEASE_NOTES_API_KEY: ${{ secrets.RELEASE_NOTES_API_KEY }}
+
+on:
+  workflow_call:
+    inputs:
+      branch:
+        description: Release branch (the commit released must be on it).
+        required: true
+        type: string
+      bump:
+        description: patch, minor or major (ignored for the first release and when `version` is set).
+        required: false
+        type: string
+        default: patch
+      ref:
+        description: Commit to release. Default the head of `branch`.
+        required: false
+        type: string
+        default: ""
+      version:
+        description: Exact version, X.Y.Z[-pre], instead of a bump.
+        required: false
+        type: string
+        default: ""
+      runner:
+        description: Runner label, or a JSON array of labels.
+        required: false
+        type: string
+        default: '["self-hosted", "linux", "x64", "microscaler"]'
+      release_notes_base_url:
+        description: OpenAI-compatible endpoint for the notes model (reachable from `runner`).
+        required: false
+        type: string
+        default: http://10.177.76.236/v1
+      release_notes_model:
+        description: Model for the notes.
+        required: false
+        type: string
+        default: Qwen/Qwen3.8-27B-FP8
+    secrets:
+      RELEASE_NOTES_API_KEY:
+        description: Key for release_notes_base_url. Without it the notes are the commit changelog.
+        required: false
+    outputs:
+      tag:
+        description: The tag created.
+        value: ${{ jobs.release.outputs.tag }}
+
+permissions:
+  contents: write
+  checks: read
+  statuses: read
+
+concurrency:
+  group: library-release-${{ github.repository }}
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Release
+    runs-on: ${{ (startsWith(inputs.runner, '[') && fromJSON(inputs.runner)) || inputs.runner }}
+    timeout-minutes: 20
+    outputs:
+      tag: ${{ steps.plan.outputs.tag }}
+    env:
+      NOTES_KEY: ${{ secrets.RELEASE_NOTES_API_KEY }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.branch }}
+          fetch-depth: 0
+
+      # Checks out the commit, requires it green, and works out the version and the previous tag.
+      - name: Plan
+        id: plan
+        uses: octopilot/actions/library-release@main
+        with:
+          phase: plan
+          branch: ${{ inputs.branch }}
+          ref: ${{ inputs.ref }}
+          bump: ${{ inputs.bump }}
+          version: ${{ inputs.version }}
+
+      - name: Release notes (model)
+        if: env.NOTES_KEY != '' && steps.plan.outputs.previous_tag != ''
+        continue-on-error: true
+        uses: octopilot/actions/release@main
+        env:
+          OPENAI_BASE_URL: ${{ inputs.release_notes_base_url }}
+          OPENAI_API_KEY: ${{ secrets.RELEASE_NOTES_API_KEY }}
+        with:
+          provider: openai
+          model: ${{ inputs.release_notes_model }}
+          version: ${{ steps.plan.outputs.tag }}
+          since_tag: ${{ steps.plan.outputs.previous_tag }}
+          output_filename: release-notes.md
+          template: |
+            ## Summary
+            [one or two sentences on what changed for users of this library]
+
+            ### Breaking changes
+            - [only if a commit is marked breaking; otherwise leave the section out]
+            ### Features
+            - [new features and enhancements]
+            ### Fixes
+            - [bug fixes]
+            ### Dependencies
+            - [dependency updates]
+            ### Other
+            - [docs, tests, ci, refactors]
+
+      - name: Release notes
+        uses: octopilot/actions/library-release@main
+        with:
+          phase: notes
+          tag: ${{ steps.plan.outputs.tag }}
+          previous_tag: ${{ steps.plan.outputs.previous_tag }}
+          sha: ${{ steps.plan.outputs.sha }}
+          notes_file: release-notes.md
+
+      - name: Tag
+        env:
+          TAG: ${{ steps.plan.outputs.tag }}
+          SHA: ${{ steps.plan.outputs.sha }}
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag -a "$TAG" -m "Release $TAG" "$SHA"
+          git push origin "refs/tags/$TAG"
+          echo "Released $TAG at ${SHA:0:12}" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ steps.plan.outputs.tag }}
+          name: ${{ steps.plan.outputs.tag }}
+          body_path: release-notes.md
+          prerelease: ${{ steps.plan.outputs.prerelease == 'true' }}
+          make_latest: ${{ steps.plan.outputs.prerelease != 'true' }}

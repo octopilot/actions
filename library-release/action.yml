@@ -1,0 +1,75 @@
+name: 'Library release: plan or notes'
+description: >
+  Library releases tag a commit that is already on the release branch and green, so nothing is pushed to a branch.
+  `plan` checks out that commit, checks every CI check on it passed, and works out the next vX.Y.Z from the existing
+  tags (the first release takes the version in Cargo.toml). `notes` writes the release notes: it keeps notes a
+  generator already wrote, otherwise a changelog of the commit subjects since the previous tag (breaking changes,
+  features, fixes, dependencies, other), and drops any line that names a downstream project.
+  Used by .github/workflows/library-release.yml.
+inputs:
+  phase:
+    description: 'plan or notes'
+    required: true
+  branch:
+    description: 'Release branch (plan)'
+    required: false
+    default: ''
+  ref:
+    description: 'Commit to release (plan); default: the head of the release branch'
+    required: false
+    default: ''
+  bump:
+    description: 'patch, minor or major (plan)'
+    required: false
+    default: 'patch'
+  version:
+    description: 'Exact version instead of a bump, X.Y.Z[-pre] (plan)'
+    required: false
+    default: ''
+  tag:
+    description: 'Tag being released (notes)'
+    required: false
+    default: ''
+  previous_tag:
+    description: 'Previous release tag (notes); empty for the first release'
+    required: false
+    default: ''
+  sha:
+    description: 'Commit being released (notes)'
+    required: false
+    default: ''
+  notes_file:
+    description: 'Release notes file (notes)'
+    required: false
+    default: 'release-notes.md'
+  token:
+    description: 'Token that can read the commit checks'
+    required: false
+    default: ${{ github.token }}
+outputs:
+  sha:
+    value: ${{ steps.run.outputs.sha }}
+  version:
+    value: ${{ steps.run.outputs.version }}
+  tag:
+    value: ${{ steps.run.outputs.tag }}
+  previous_tag:
+    value: ${{ steps.run.outputs.previous_tag }}
+  prerelease:
+    value: ${{ steps.run.outputs.prerelease }}
+runs:
+  using: composite
+  steps:
+    - id: run
+      shell: bash
+      env:
+        BRANCH: ${{ inputs.branch }}
+        REF: ${{ inputs.ref }}
+        BUMP: ${{ inputs.bump }}
+        VERSION: ${{ inputs.version }}
+        TAG: ${{ inputs.tag }}
+        PREVIOUS_TAG: ${{ inputs.previous_tag }}
+        SHA: ${{ inputs.sha }}
+        NOTES_FILE: ${{ inputs.notes_file }}
+        GITHUB_TOKEN: ${{ inputs.token }}
+      run: python3 "${{ github.action_path }}/release.py" "${{ inputs.phase }}"
