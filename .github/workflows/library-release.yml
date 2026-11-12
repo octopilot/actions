@@ -27,6 +27,7 @@ name: Library release
 #       uses: octopilot/actions/.github/workflows/library-release.yml@main
 #       with: { branch: main, bump: "${{ inputs.bump }}", ref: "${{ inputs.ref }}", version: "${{ inputs.version }}" }
 #       secrets:
+#         REPO_TOKEN: ${{ secrets.REPO_PAT }}
 #         RELEASE_NOTES_API_KEY: ${{ secrets.RELEASE_NOTES_API_KEY }}
 
 on:
@@ -67,6 +68,11 @@ on:
         type: string
         default: Qwen/Qwen3.8-27B-FP8
     secrets:
+      REPO_TOKEN:
+        description: >
+          Token (contents: write, workflows) that pushes the tag and creates the release: secrets.REPO_PAT. GitHub
+          refuses a tag pushed with GITHUB_TOKEN when the tagged tree contains workflow files.
+        required: false
       RELEASE_NOTES_API_KEY:
         description: Key for release_notes_base_url. Without it the notes are the commit changelog.
         required: false
@@ -98,6 +104,7 @@ jobs:
         with:
           ref: ${{ inputs.branch }}
           fetch-depth: 0
+          token: ${{ secrets.REPO_TOKEN || github.token }}
 
       # Checks out the commit, requires it green, and works out the version and the previous tag.
       - name: Plan
@@ -165,5 +172,6 @@ jobs:
           tag_name: ${{ steps.plan.outputs.tag }}
           name: ${{ steps.plan.outputs.tag }}
           body_path: release-notes.md
+          token: ${{ secrets.REPO_TOKEN || github.token }}
           prerelease: ${{ steps.plan.outputs.prerelease == 'true' }}
           make_latest: ${{ steps.plan.outputs.prerelease != 'true' }}
