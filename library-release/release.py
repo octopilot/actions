@@ -201,8 +201,7 @@ def structured_notes(repo: str, tag: str, prev: str | None, sha: str) -> str:
         count += 1
         groups[classify(subject, body)].append(f"- {subject} ({h[:8]})")
     lines = [
-        f"{count} commit{'s' if count != 1 else ''} since {prev} "
-        f"([compare]({server}/{repo}/compare/{prev}...{tag})).",
+        f"{count} commit{'s' if count != 1 else ''} since {prev} ([compare]({server}/{repo}/compare/{prev}...{tag})).",
         "",
     ]
     for s in SECTIONS:
