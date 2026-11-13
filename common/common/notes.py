@@ -231,6 +231,13 @@ def _call_anthropic(commits: list[str], format_instructions: str, version: str, 
     return content.strip()
 
 
+def bare_version(version: str) -> str:
+    """The version without a leading v ("v0.1.220" -> "0.1.220"): the templates write "v{{VERSION}}", and a tag-style
+    version gave headings like "Release vv0.1.220"."""
+    v = version.strip()
+    return v[1:] if v[:1] in ("v", "V") and v[1:2].isdigit() else v
+
+
 def plain_notes(project_root: Path, version: str, since_tag: str | None = None) -> str:
     """Release notes without a model: the commit subjects since the previous tag. The fallback when the provider fails,
     so a release never waits on an AI service."""
@@ -268,7 +275,7 @@ def run(
 
     commits = get_commits_since(project_root, ref)
     template = load_template(template_path)
-    format_instructions = template.replace("{{VERSION}}", version)
+    format_instructions = template.replace("{{VERSION}}", bare_version(version))
 
     provider = (provider or os.environ.get("RELEASE_NOTES_PROVIDER") or "anthropic").strip().lower()
     if provider not in ("openai", "anthropic"):
