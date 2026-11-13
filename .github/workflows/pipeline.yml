@@ -1009,9 +1009,12 @@ jobs:
           model: ${{ inputs.release_notes_model }}
 
       # A library's release is cut by library-release.yml, which pushes the tag and publishes the GitHub Release in
-      # one go, so the release already exists (published) when this tag run gets here. Published releases are
-      # immutable: they take no new assets and the upload fails (BRRTRouter v0.1.1, 13 Nov 2026). Leave a published
-      # release as it is; create one only when none exists, or fill a draft.
+      # one go, so the release already exists when this tag run gets here. In a repository with immutable releases a
+      # published release takes no new assets and the upload fails (BRRTRouter v0.1.1, 13 Nov 2026): leave an
+      # IMMUTABLE release as it is. Every other release - none yet, a draft, or a published but mutable one (an app's
+      # Trigger Release publishes it with GitHub's notes before this run) - goes on to the step below, which writes
+      # the AI notes over the body and attaches the files. 41b0068 keyed this on "published" and so stopped the AI
+      # notes on PriceWhisperer from v0.1.215 on (13 Nov 2026).
       - name: Existing release
         id: existing
         env:
@@ -1022,17 +1025,17 @@ jobs:
             -H "Authorization: Bearer ${GH_TOKEN}" -H 'Accept: application/vnd.github+json' \
             "${GITHUB_API_URL:-https://api.github.com}/repos/${GITHUB_REPOSITORY}/releases/tags/${GITHUB_REF_NAME}")"
           case "$code" in
-            200) published="$(jq -r 'if .draft then "false" else "true" end' existing-release.json)" ;;
-            404) published=false ;;
+            200) immutable="$(jq -r 'if (.immutable == true) and (.draft | not) then "true" else "false" end' existing-release.json)" ;;
+            404) immutable=false ;;
             *) rm -f existing-release.json; echo "::error::release lookup for ${GITHUB_REF_NAME} returned HTTP ${code}"; exit 1 ;;
           esac
           rm -f existing-release.json
-          echo "published=${published}" >> "$GITHUB_OUTPUT"
-          if [ "$published" = true ]; then
+          echo "immutable=${immutable}" >> "$GITHUB_OUTPUT"
+          if [ "$immutable" = true ]; then
             {
-              echo "### GitHub Release \`${GITHUB_REF_NAME}\` already published"
+              echo "### GitHub Release \`${GITHUB_REF_NAME}\` is published and immutable"
               echo
-              echo "Left unchanged (published releases are immutable; library-release.yml cut this one)."
+              echo "Left unchanged (an immutable release takes no new assets; library-release.yml cut this one)."
               if [ -f release_result.json ] || [ -n "$(find dist -type f 2>/dev/null | head -1)" ]; then
                 echo
                 echo 'Not attached:'
@@ -1040,11 +1043,11 @@ jobs:
                 find dist -type f 2>/dev/null | sed 's/^/- /'
               fi
             } >> "$GITHUB_STEP_SUMMARY"
-            echo "::notice::GitHub Release ${GITHUB_REF_NAME} is already published; leaving it unchanged"
+            echo "::notice::GitHub Release ${GITHUB_REF_NAME} is published and immutable; leaving it unchanged"
           fi
 
       - name: Create GitHub Release
-        if: steps.existing.outputs.published != 'true'
+        if: steps.existing.outputs.immutable != 'true'
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}

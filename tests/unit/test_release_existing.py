@@ -1,5 +1,6 @@
-"""The release job leaves an already-published GitHub Release alone (library-release.yml publishes it before the tag
-run gets there, and published releases take no new assets); it creates one when none exists and fills a draft."""
+"""The release job leaves a published IMMUTABLE GitHub Release alone (library-release.yml publishes it before the tag
+run gets there, and an immutable release takes no new assets); every other release - none, a draft, or published but
+mutable (an app's Trigger Release publishes it with GitHub's notes first) - gets the AI notes and the files."""
 
 import os
 import subprocess
@@ -61,29 +62,43 @@ def run(
     return proc, out.read_text(), summary.read_text() if summary.exists() else ""
 
 
-def test_create_step_is_skipped_for_a_published_release():
+def test_create_step_is_skipped_only_for_an_immutable_release():
     create = next(s for s in steps() if s.get("name") == "Create GitHub Release")
-    assert create["if"] == "steps.existing.outputs.published != 'true'"
+    assert create["if"] == "steps.existing.outputs.immutable != 'true'"
 
 
-def test_published_release_is_left_alone(tmp_path):
-    proc, out, summary = run(tmp_path, "200", '{"draft": false}', assets=True)
+def test_published_mutable_release_gets_the_notes(tmp_path):
+    # PriceWhisperer: Trigger Release publishes with GitHub's notes; this run writes the AI notes over them
+    proc, out, summary = run(tmp_path, "200", '{"draft": false, "immutable": false}')
     assert proc.returncode == 0, proc.stderr
-    assert "published=true" in out
-    assert "already published" in summary
+    assert "immutable=false" in out
+    assert summary == ""
+
+
+def test_published_release_without_the_flag_is_treated_as_mutable(tmp_path):
+    proc, out, _ = run(tmp_path, "200", '{"draft": false}')
+    assert proc.returncode == 0, proc.stderr
+    assert "immutable=false" in out
+
+
+def test_published_immutable_release_is_left_alone(tmp_path):
+    proc, out, summary = run(tmp_path, "200", '{"draft": false, "immutable": true}', assets=True)
+    assert proc.returncode == 0, proc.stderr
+    assert "immutable=true" in out
+    assert "published and immutable" in summary
     assert "release_result.json" in summary and "dist/tool.tar.gz" in summary
 
 
 def test_draft_release_is_filled(tmp_path):
-    proc, out, _ = run(tmp_path, "200", '{"draft": true}')
+    proc, out, _ = run(tmp_path, "200", '{"draft": true, "immutable": true}')
     assert proc.returncode == 0, proc.stderr
-    assert "published=false" in out
+    assert "immutable=false" in out
 
 
 def test_missing_release_is_created(tmp_path):
     proc, out, summary = run(tmp_path, "404", '{"message": "Not Found"}')
     assert proc.returncode == 0, proc.stderr
-    assert "published=false" in out
+    assert "immutable=false" in out
     assert summary == ""
 
 
