@@ -59,6 +59,11 @@ than a line, put it in a **committed script** (`hack/test.sh`) and declare
 with the same compose file (`docker compose -f hack/test-deps/docker-compose.yml
 up -d --wait && ./hack/test.sh`).
 
+A **docker artifact** has no `buildpacks.env`, so it declares the same settings
+under `docker.buildArgs` (`BP_TEST_COMMAND`, `BP_TEST_LABEL`, `BP_TEST_SOFT_FAIL`).
+Only `BP_TEST_*` keys are read from there, and the pipeline keeps them out of the
+image build; a Dockerfile does not need to declare them.
+
 This replaces per-repo GitHub Actions `services:` blocks: the reusable
 pipeline cannot know your services, but your repo can declare them.
 

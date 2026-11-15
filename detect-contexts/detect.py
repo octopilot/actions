@@ -225,7 +225,28 @@ RESERVED_DELIVERABLE_SUFFIXES = {"lib": "lib", "bin": "binary"}
 
 
 def artifact_env(artifact: dict) -> dict[str, str]:
-    """Parse an artifact's buildpacks.env (list/dict/str) into a dict."""
+    """Parse an artifact's buildpacks.env (list/dict/str) into a dict.
+
+    A docker artifact has no buildpacks.env, so it declares its test settings
+    (BP_TEST_COMMAND, BP_TEST_LABEL, BP_TEST_SOFT_FAIL) under docker.buildArgs,
+    the one free-form map its Skaffold schema allows. Only BP_TEST_* keys are
+    read from there; build_integration_matrix keeps them out of the image build.
+    """
+    out = _buildpacks_env(artifact)
+    docker_decl = artifact.get("docker")
+    build_args = docker_decl.get("buildArgs") if isinstance(docker_decl, dict) else None
+    if isinstance(build_args, dict):
+        for k, v in build_args.items():
+            if str(k).startswith(TEST_ENV_PREFIX):
+                out.setdefault(str(k), str(v))
+    return out
+
+
+# Test-leg settings an artifact may declare; never part of an image build.
+TEST_ENV_PREFIX = "BP_TEST_"
+
+
+def _buildpacks_env(artifact: dict) -> dict[str, str]:
     env = (artifact.get("buildpacks") or {}).get("env")
     out: dict[str, str] = {}
     if isinstance(env, dict):
@@ -643,8 +664,11 @@ def build_integration_matrix(artifacts: list[dict], chart_paths: list[str], repo
         if build_method == "docker":
             entry["dockerfile"] = dockerfile_rel or "Dockerfile"
             build_args = docker_decl.get("buildArgs") if isinstance(docker_decl, dict) else None
-            if isinstance(build_args, dict) and build_args:
-                entry["build_args"] = {str(k): str(v) for k, v in build_args.items()}
+            if isinstance(build_args, dict):
+                # BP_TEST_* declare the test leg (artifact_env), not the image.
+                image_args = {str(k): str(v) for k, v in build_args.items() if not str(k).startswith(TEST_ENV_PREFIX)}
+                if image_args:
+                    entry["build_args"] = image_args
         if build_method == "pack":
             buildpacks = artifact.get("buildpacks") or {}
             entry["builder"] = buildpacks.get("builder", DEFAULT_BUILDER)

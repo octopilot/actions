@@ -8,6 +8,8 @@ import pytest
 # Add the directory containing detect.py to sys.path so we can import it
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../detect-contexts")))
 
+from typing import ClassVar
+
 import detect
 
 
@@ -566,3 +568,46 @@ build:
         assert images[0]["dockerfile"] == "docker/microservices/Dockerfile"
         assert images[0]["build_args"]["PACKAGE"] == "pricewhisperer_orders"
         assert "builder" not in images[0]
+
+
+class TestDockerArtifactTestCommand:
+    """A docker artifact declares its test leg under docker.buildArgs (BP_TEST_*)."""
+
+    ARTIFACT: ClassVar[dict] = {
+        "image": "ghcr.io/acme/controller",
+        "context": ".",
+        "docker": {
+            "dockerfile": "dockerfiles/Dockerfile.controller",
+            "buildArgs": {"BP_TEST_COMMAND": "./hack/test.sh", "REGISTRY_ORG": "acme"},
+        },
+    }
+
+    def test_artifact_env_reads_test_settings_only(self):
+        assert detect.artifact_env(self.ARTIFACT) == {"BP_TEST_COMMAND": "./hack/test.sh"}
+
+    def test_buildpacks_env_wins_over_build_args(self):
+        artifact = {
+            "buildpacks": {"env": ["BP_TEST_COMMAND=cargo test"]},
+            "docker": {"buildArgs": {"BP_TEST_COMMAND": "./hack/test.sh"}},
+        }
+        assert detect.artifact_env(artifact)["BP_TEST_COMMAND"] == "cargo test"
+
+    def test_test_leg_runs_the_declared_command(self, tmp_path):
+        (tmp_path / "Cargo.toml").write_text('[package]\nname = "controller"\nversion = "0.1.0"\n')
+        matrix = detect.build_matrix_include([self.ARTIFACT], str(tmp_path))
+        assert [leg["command"] for leg in matrix] == ["./hack/test.sh"]
+
+    def test_image_build_gets_no_test_settings(self, tmp_path):
+        (tmp_path / "Cargo.toml").write_text('[package]\nname = "controller"\nversion = "0.1.0"\n')
+        entries = detect.build_integration_matrix([self.ARTIFACT], [], str(tmp_path))
+        assert entries[0]["build_method"] == "docker"
+        assert entries[0]["build_args"] == {"REGISTRY_ORG": "acme"}
+
+    def test_only_test_settings_leaves_no_build_args(self, tmp_path):
+        artifact = {
+            "image": "ghcr.io/acme/controller",
+            "context": ".",
+            "docker": {"dockerfile": "Dockerfile", "buildArgs": {"BP_TEST_COMMAND": "./hack/test.sh"}},
+        }
+        entries = detect.build_integration_matrix([artifact], [], str(tmp_path))
+        assert "build_args" not in entries[0]
