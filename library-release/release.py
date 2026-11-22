@@ -145,7 +145,7 @@ def gate(repo: str, sha: str) -> None:
             break
         page += 1
     runs = [r for r in runs if not (run_id and f"/actions/runs/{run_id}/" in (r.get("details_url") or ""))]
-    # Earlier release attempts are not CI: a failed attempt must not block releasing the commit after its cause is fixed.
+    # Earlier release attempts are not CI: a failed one must not block the commit once its cause is fixed.
     runs = [r for r in runs if not from_this_workflow(repo, r)]
     latest: dict[str, dict] = {}
     for r in sorted(runs, key=lambda r: (r.get("started_at") or "", r["id"])):
