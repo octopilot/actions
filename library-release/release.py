@@ -115,6 +115,23 @@ def api(path: str) -> list | dict:
         return json.loads(resp.read())
 
 
+_WORKFLOW_OF_RUN: dict[str, str] = {}
+
+
+def from_this_workflow(repo: str, check_run: dict) -> bool:
+    """The check run belongs to another run of the workflow running this release (GITHUB_WORKFLOW_REF's file)."""
+    mine = os.environ.get("GITHUB_WORKFLOW_REF", "").split("@")[0]
+    m = re.search(r"/actions/runs/(\d+)/", check_run.get("details_url") or "")
+    if not mine or not m:
+        return False
+    run = m.group(1)
+    if run not in _WORKFLOW_OF_RUN:
+        data = api(f"/repos/{repo}/actions/runs/{run}")
+        path = data.get("path", "") if isinstance(data, dict) else ""
+        _WORKFLOW_OF_RUN[run] = f"{repo}/{path.split('@')[0]}" if path else ""
+    return _WORKFLOW_OF_RUN[run] == mine
+
+
 def gate(repo: str, sha: str) -> None:
     """Every check on the commit has finished and passed (the newest run of each check counts), and at least one
     passed. This run's own jobs are left out."""
@@ -128,6 +145,8 @@ def gate(repo: str, sha: str) -> None:
             break
         page += 1
     runs = [r for r in runs if not (run_id and f"/actions/runs/{run_id}/" in (r.get("details_url") or ""))]
+    # Earlier release attempts are not CI: a failed one must not block the commit once its cause is fixed.
+    runs = [r for r in runs if not from_this_workflow(repo, r)]
     latest: dict[str, dict] = {}
     for r in sorted(runs, key=lambda r: (r.get("started_at") or "", r["id"])):
         latest[r["name"]] = r
